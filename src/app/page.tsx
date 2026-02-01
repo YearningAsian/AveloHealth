@@ -36,13 +36,13 @@ export default function Home() {
             </div>
             <div className="relative">
               {/* Image Placeholder */}
-              <div className="aspect-video bg-muted rounded-lg flex items-center justify-center border-2 border-dashed">
-                <div className="text-center">
-                  <Activity className="h-16 w-16 text-muted-foreground mx-auto mb-2" />
-                  <p className="text-sm text-muted-foreground">Hero Image Placeholder</p>
-                  <p className="text-xs text-muted-foreground">1200x800px recommended</p>
-                </div>
-              </div>
+              <div className="relative aspect-video overflow-hidden rounded-xl border">
+  <img 
+    src="/images/geminipic1.png" 
+    alt="AveloHealth Innovation"
+    className="object-cover w-full h-full"
+  />
+</div>
             </div>
           </div>
         </div>
@@ -106,12 +106,13 @@ export default function Home() {
               <CardHeader>
                 <div className="mb-4">
                   {/* Image Placeholder */}
-                  <div className="aspect-video bg-muted rounded-lg flex items-center justify-center border-2 border-dashed mb-4">
-                    <div className="text-center">
-                      <HeartPulse className="h-12 w-12 text-muted-foreground mx-auto mb-2" />
-                      <p className="text-xs text-muted-foreground">QuickDiagnosis Image</p>
-                    </div>
-                  </div>
+                  <div className="relative aspect-video overflow-hidden rounded-xl border">
+  <img 
+    src="/images/geminipic2.png" 
+    alt="QuickDiagnosis AI Assessment"
+    className="object-cover w-full h-full"
+  />
+</div>
                 </div>
                 <CardTitle className="text-3xl mb-3">QuickDiagnosis</CardTitle>
               </CardHeader>

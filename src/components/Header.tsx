@@ -15,7 +15,7 @@ export function Header() {
         {/* Logo */}
         <Link href="/" className="flex items-center">
           <img 
-            src="/images/avelohealth-logo-header.svg" 
+            src="/images/AveloHealth.svg" 
             alt="AveloHealth"
             className="h-10 w-auto"
           />
