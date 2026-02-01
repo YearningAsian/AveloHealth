@@ -64,12 +64,13 @@ export default function Home() {
               <CardHeader>
                 <div className="mb-4">
                   {/* Image Placeholder */}
-                  <div className="aspect-video bg-muted rounded-lg flex items-center justify-center border-2 border-dashed mb-4">
-                    <div className="text-center">
-                      <Users className="h-12 w-12 text-muted-foreground mx-auto mb-2" />
-                      <p className="text-xs text-muted-foreground">CRM Platform Image</p>
-                    </div>
-                  </div>
+                  <div className="aspect-video relative overflow-hidden rounded-lg mb-4">
+  <img 
+    src="/images/geminipic3.png" 
+    alt="CRM Platform" 
+    className="object-cover w-full h-full"
+  />
+</div>
                 </div>
                 <CardTitle className="text-3xl mb-3">CRM Platform</CardTitle>
               </CardHeader>
