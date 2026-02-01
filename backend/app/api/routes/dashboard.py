@@ -56,6 +56,7 @@ async def get_dashboard(request: Request, current_user: dict = Depends(get_curre
         user_profile = {
             "id": user.get('USER_ID'),
             "name": user.get('NAME', current_user.get("name", "Unknown")),
+            "email": user.get('EMAIL', current_user.get("email", "")),
             "dateOfBirth": str(user.get('DATE_OF_BIRTH', '')),
             "phoneNumber": user.get('PHONE_NUMBER', ''),
             "accountNumber": user.get('ACCOUNT_NUMBER', '')
@@ -64,6 +65,7 @@ async def get_dashboard(request: Request, current_user: dict = Depends(get_curre
         user_profile = {
             "id": user_id,
             "name": current_user.get("name", "Unknown"),
+            "email": current_user.get("email", ""),
             "dateOfBirth": "",
             "phoneNumber": "",
             "accountNumber": ""

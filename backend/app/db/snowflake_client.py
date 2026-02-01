@@ -387,7 +387,7 @@ class SnowflakeClient:
         if status:
             return await self.execute("""
                 SELECT a.*, 
-                       COALESCE(p.name, 'Unknown Provider') as provider_name, 
+                       COALESCE(p.name, 'No Provider') as provider_name, 
                        COALESCE(p.phone_number, '') as provider_phone, 
                        COALESCE(p.specialty, '') as specialty
                 FROM appointments a
@@ -399,7 +399,7 @@ class SnowflakeClient:
         else:
             return await self.execute("""
                 SELECT a.*, 
-                       COALESCE(p.name, 'Unknown Provider') as provider_name, 
+                       COALESCE(p.name, 'No Provider') as provider_name, 
                        COALESCE(p.phone_number, '') as provider_phone, 
                        COALESCE(p.specialty, '') as specialty
                 FROM appointments a
@@ -413,7 +413,7 @@ class SnowflakeClient:
         """Get single appointment with provider details"""
         result = await self.execute("""
             SELECT a.*, 
-                   COALESCE(p.name, 'Unknown Provider') as provider_name, 
+                   COALESCE(p.name, 'No Provider') as provider_name, 
                    COALESCE(p.phone_number, '') as provider_phone, 
                    COALESCE(p.specialty, '') as specialty
             FROM appointments a

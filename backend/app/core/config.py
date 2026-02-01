@@ -18,6 +18,17 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     ENCRYPTION_KEY: str = "your-encryption-key-change-in-production"
     
+    # Auth0 Configuration
+    AUTH0_DOMAIN: str = ""
+    AUTH0_CLIENT_ID: str = ""
+    AUTH0_CLIENT_SECRET: str = ""
+    AUTH0_AUDIENCE: str = ""
+    
+    # Twilio Configuration
+    TWILIO_ACCOUNT_SID: str = ""
+    TWILIO_AUTH_TOKEN: str = ""
+    TWILIO_VERIFY_SERVICE_SID: str = "VAdd2abdb9d5a76d83f09a051854bfca10"
+    
     # CORS
     ALLOWED_ORIGINS: List[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
     
