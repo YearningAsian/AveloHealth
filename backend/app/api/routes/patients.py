@@ -196,3 +196,87 @@ async def get_ai_summaries(request: Request):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/webhook/tally")
+async def tally_webhook(
+    request: Request
+):
+    """
+    Tally form webhook endpoint for QuickDiagnosis assessments
+    Receives form submissions from Tally and stores patient data
+    No authentication required - webhook endpoint
+    """
+    snowflake: SnowflakeClient = request.app.state.snowflake
+    
+    try:
+        # Get the raw JSON payload from Tally
+        payload = await request.json()
+        
+        # Extract Tally form data
+        # Tally sends data in the format: {"eventId": "...", "eventType": "FORM_RESPONSE", "createdAt": "...", "data": {...}}
+        event_type = payload.get("eventType")
+        form_data = payload.get("data", {})
+        
+        # Only process form responses
+        if event_type != "FORM_RESPONSE":
+            return {
+                "success": True,
+                "message": "Event type not processed",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        
+        # Extract fields from Tally form (adjust field names based on your Tally form structure)
+        fields = form_data.get("fields", [])
+        
+        # Helper function to get field value by label or key
+        def get_field_value(fields_list, label_key):
+            for field in fields_list:
+                if field.get("label") == label_key or field.get("key") == label_key:
+                    return field.get("value", "")
+            return None
+        
+        # Extract patient information from form fields
+        name = get_field_value(fields, "name") or get_field_value(fields, "Name") or "Unknown"
+        age = get_field_value(fields, "age") or get_field_value(fields, "Age")
+        phone = get_field_value(fields, "phone") or get_field_value(fields, "Phone") or get_field_value(fields, "Phone number")
+        location = get_field_value(fields, "location") or get_field_value(fields, "Location") or ""
+        symptoms = get_field_value(fields, "symptoms") or get_field_value(fields, "Symptoms") or ""
+        
+        # Convert age to int if present
+        age_int = None
+        if age:
+            try:
+                age_int = int(age)
+            except (ValueError, TypeError):
+                age_int = None
+        
+        # Insert patient call data into Snowflake
+        if phone:  # Only insert if we have at least a phone number
+            result = await snowflake.insert_patient_call(
+                name=name,
+                age=age_int or 0,
+                phone=phone,
+                location=location,
+                symptoms=symptoms
+            )
+            
+            return {
+                "success": True,
+                "message": "Patient assessment received",
+                "call_id": result.get("call_id"),
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        else:
+            return {
+                "success": False,
+                "message": "Missing required field: phone",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        
+    except Exception as e:
+        # Return 200 with error message to prevent Tally from retrying
+        return {
+            "success": False,
+            "message": f"Error processing webhook: {str(e)}",
+            "timestamp": datetime.utcnow().isoformat()
+        }
