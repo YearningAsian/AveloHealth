@@ -1,237 +1,283 @@
-"""
-Gemini AI Service
-Predictive triage and risk assessment
-"""
-
+import os
+import logging
+from typing import Dict, Any, List, Optional
 import google.generativeai as genai
-from typing import Dict, Any, List
-from datetime import datetime
-import json
-
 from app.core.config import settings
 
+logger = logging.getLogger(__name__)
+
 class GeminiService:
-    """Gemini AI service for patient risk analysis"""
+    """Service for interacting with Google Gemini AI API"""
     
     def __init__(self):
-        genai.configure(api_key=settings.GEMINI_API_KEY)
-        self.model = genai.GenerativeModel('gemini-pro')
+        """Initialize Gemini AI service"""
+        api_key = settings.GEMINI_API_KEY
+        if not api_key:
+            logger.warning("GEMINI_API_KEY not found in environment variables")
+            self.model = None
+            return
+            
+        try:
+            genai.configure(api_key=api_key)
+            self.model = genai.GenerativeModel('gemini-pro')
+            logger.info("Gemini AI service initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize Gemini AI: {str(e)}")
+            self.model = None
     
-    async def analyze_patient_risk(
-        self,
-        patient_data: Dict[str, Any],
-        clinical_data: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    async def analyze_patient_risk(self, patient_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Analyze patient risk using Gemini AI
-        Returns comprehensive risk assessment and recommendations
-        """
+        Analyze patient data to determine risk level
         
-        prompt = self._build_analysis_prompt(patient_data, clinical_data)
+        Args:
+            patient_data: Dictionary containing patient information
+            
+        Returns:
+            Dictionary with risk assessment results
+        """
+        if not self.model:
+            return {
+                "risk_level": "unknown",
+                "confidence": 0.0,
+                "reasoning": "AI service not available",
+                "recommendations": []
+            }
         
         try:
+            prompt = self._build_risk_assessment_prompt(patient_data)
             response = self.model.generate_content(prompt)
-            analysis = self._parse_gemini_response(response.text)
             
-            # Add metadata
-            analysis['patient_id'] = patient_data['id']
-            analysis['analysis_id'] = f"gemini_{int(datetime.utcnow().timestamp())}"
-            analysis['timestamp'] = datetime.utcnow().isoformat()
-            
+            # Parse AI response
+            analysis = self._parse_risk_response(response.text)
             return analysis
             
         except Exception as e:
-            print(f"❌ Gemini analysis failed: {e}")
-            return self._fallback_analysis(patient_data)
+            logger.error(f"Error analyzing patient risk: {str(e)}")
+            return {
+                "risk_level": "unknown",
+                "confidence": 0.0,
+                "reasoning": f"Analysis failed: {str(e)}",
+                "recommendations": []
+            }
     
-    def _build_analysis_prompt(
-        self,
-        patient_data: Dict[str, Any],
-        clinical_data: Dict[str, Any]
-    ) -> str:
-        """Build prompt for Gemini analysis"""
+    async def analyze_symptoms(self, symptoms: str, patient_age: int, patient_gender: str) -> Dict[str, Any]:
+        """
+        Analyze patient symptoms using Gemini AI
         
-        prompt = f"""
-You are an expert clinical AI assistant for AveloHealth, analyzing patient data to prevent patients from "falling through the cracks."
-
-**Patient Profile:**
-- Age: {self._calculate_age(patient_data.get('date_of_birth', ''))}
-- Chronic Conditions: {json.dumps(clinical_data.get('chronic_conditions', []))}
-- Current Medications: {len(clinical_data.get('medications', []))} active medications
-- Recent Appointments: {clinical_data.get('recent_appointments', 0)} in last 3 months
-- Missed Appointments: {clinical_data.get('missed_appointments', 0)}
-- Last Contact: {patient_data.get('last_contact_date', 'Unknown')}
-
-**Recent Vitals:**
-{json.dumps(clinical_data.get('recent_vitals', []), indent=2)}
-
-**Lab Results:**
-{json.dumps(clinical_data.get('lab_results', []), indent=2)}
-
-**Task:**
-Provide a comprehensive risk assessment in JSON format with the following structure:
-
-{{
-  "risk_score": <0-100 integer>,
-  "risk_level": "<low|medium|high|critical>",
-  "risk_factors": [
-    {{
-      "factor": "<description>",
-      "severity": "<low|medium|high>",
-      "description": "<explanation>",
-      "impact_score": <0-100>
-    }}
-  ],
-  "recommended_actions": [
-    {{
-      "action": "<specific action>",
-      "priority": "<low|medium|high>",
-      "deadline": "<timeframe>",
-      "category": "<clinical|administrative|outreach>"
-    }}
-  ],
-  "ai_insights": "<comprehensive analysis>",
-  "clinical_summary": "<brief clinical summary>",
-  "priority_level": "<routine|elevated|urgent|emergency>",
-  "suggested_outreach": {{
-    "should_contact": <true|false>,
-    "urgency": "<routine|soon|urgent>",
-    "preferred_method": "<phone|email|teli-ai-call>",
-    "reason": "<why contact is needed>"
-  }}
-}}
-
-**Focus Areas:**
-1. Identify patterns indicating declining health
-2. Flag missed appointments or medication non-compliance
-3. Assess urgency of intervention needed
-4. Recommend proactive outreach to prevent complications
-5. Consider social determinants of health
-
-Respond ONLY with valid JSON.
-"""
-        return prompt
-    
-    def _parse_gemini_response(self, response_text: str) -> Dict[str, Any]:
-        """Parse Gemini JSON response"""
-        try:
-            # Extract JSON from response (may have markdown formatting)
-            json_start = response_text.find('{')
-            json_end = response_text.rfind('}') + 1
+        Args:
+            symptoms: Description of patient symptoms
+            patient_age: Patient age
+            patient_gender: Patient gender
             
-            if json_start != -1 and json_end > json_start:
-                json_str = response_text[json_start:json_end]
-                return json.loads(json_str)
-            else:
-                return self._fallback_analysis_structure()
-                
-        except json.JSONDecodeError:
-            print("⚠️  Failed to parse Gemini response as JSON")
-            return self._fallback_analysis_structure()
-    
-    def _fallback_analysis(self, patient_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Fallback analysis if Gemini fails"""
-        return {
-            "patient_id": patient_data['id'],
-            "analysis_id": f"fallback_{int(datetime.utcnow().timestamp())}",
-            "timestamp": datetime.utcnow().isoformat(),
-            "risk_score": 50,
-            "risk_level": "medium",
-            "risk_factors": [],
-            "recommended_actions": [],
-            "ai_insights": "Analysis temporarily unavailable. Manual review recommended.",
-            "clinical_summary": "Unable to generate automated summary.",
-            "priority_level": "routine",
-            "suggested_outreach": {
-                "should_contact": False,
-                "urgency": "routine",
-                "preferred_method": "phone",
-                "reason": "Standard follow-up"
+        Returns:
+            Dictionary with symptom analysis
+        """
+        if not self.model:
+            return {
+                "severity": "unknown",
+                "possible_conditions": [],
+                "urgency": "unknown",
+                "recommendations": ["Please consult with a healthcare provider"]
             }
-        }
-    
-    def _fallback_analysis_structure(self) -> Dict[str, Any]:
-        """Return empty analysis structure"""
-        return {
-            "risk_score": 50,
-            "risk_level": "medium",
-            "risk_factors": [],
-            "recommended_actions": [],
-            "ai_insights": "Analysis parsing failed. Manual review needed.",
-            "clinical_summary": "Unable to parse response.",
-            "priority_level": "routine",
-            "suggested_outreach": {
-                "should_contact": False,
-                "urgency": "routine",
-                "preferred_method": "phone",
-                "reason": "Standard follow-up"
-            }
-        }
-    
-    @staticmethod
-    def _calculate_age(date_of_birth: str) -> int:
-        """Calculate age from date of birth"""
-        if not date_of_birth:
-            return 0
         
         try:
-            dob = datetime.fromisoformat(date_of_birth.replace('Z', '+00:00'))
-            age = (datetime.utcnow() - dob).days // 365
-            return age
-        except:
-            return 0
-    
-    async def batch_analyze_patients(
-        self,
-        patients_data: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
-        """
-        Batch analyze multiple patients for predictive triage
-        Returns list of patients sorted by risk score
-        """
-        analyses = []
-        
-        for patient in patients_data:
-            analysis = await self.analyze_patient_risk(
-                patient,
-                patient.get('clinical_data', {})
-            )
-            analyses.append(analysis)
-        
-        # Sort by risk score descending
-        analyses.sort(key=lambda x: x.get('risk_score', 0), reverse=True)
-        
-        return analyses
-    
-    async def generate_outreach_script(
-        self,
-        patient_data: Dict[str, Any],
-        analysis: Dict[str, Any]
-    ) -> str:
-        """Generate personalized outreach script for Teli AI or staff"""
-        
-        prompt = f"""
-Generate a compassionate, professional phone script for contacting a patient.
+            prompt = f"""You are a medical AI assistant. Analyze the following symptoms and provide assessment.
 
-**Patient Context:**
-- Risk Level: {analysis.get('risk_level', 'unknown')}
-- Key Concerns: {', '.join([rf['factor'] for rf in analysis.get('risk_factors', [])[:3]])}
-- Last Contact: {patient_data.get('last_contact_date', 'unknown')}
+Patient Information:
+- Age: {patient_age}
+- Gender: {patient_gender}
+- Symptoms: {symptoms}
 
-**Script Requirements:**
-1. Warm, empathetic greeting
-2. Express concern for patient's wellbeing
-3. Address specific health concerns without alarming
-4. Offer support and schedule follow-up
-5. Keep under 2 minutes reading time
-6. HIPAA-compliant language
+Provide:
+1. Severity level (mild, moderate, severe, critical)
+2. Possible conditions (list 2-3 most likely)
+3. Urgency level (non-urgent, soon, urgent, emergency)
+4. Recommendations (practical next steps)
 
-Provide the script in a natural, conversational tone.
-"""
-        
-        try:
+Format your response as a structured analysis."""
+
             response = self.model.generate_content(prompt)
-            return response.text
+            analysis = self._parse_symptom_response(response.text)
+            return analysis
+            
         except Exception as e:
-            print(f"❌ Script generation failed: {e}")
-            return "Hello, this is AveloHealth calling. We wanted to check in on your recent health status and see if you need any support. Would you be available to schedule a follow-up appointment?"
+            logger.error(f"Error analyzing symptoms: {str(e)}")
+            return {
+                "severity": "unknown",
+                "possible_conditions": [],
+                "urgency": "unknown",
+                "recommendations": ["Analysis failed. Please consult a healthcare provider."]
+            }
+    
+    async def triage_patient(self, patient_info: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Perform AI-powered patient triage
+        
+        Args:
+            patient_info: Complete patient information including symptoms, vitals, history
+            
+        Returns:
+            Triage results with priority level and recommendations
+        """
+        if not self.model:
+            return {
+                "priority": "medium",
+                "category": "general",
+                "wait_time_estimate": "unknown",
+                "recommendations": []
+            }
+        
+        try:
+            prompt = self._build_triage_prompt(patient_info)
+            response = self.model.generate_content(prompt)
+            triage_result = self._parse_triage_response(response.text)
+            return triage_result
+            
+        except Exception as e:
+            logger.error(f"Error in patient triage: {str(e)}")
+            return {
+                "priority": "medium",
+                "category": "general",
+                "wait_time_estimate": "unknown",
+                "recommendations": [f"Triage failed: {str(e)}"]
+            }
+    
+    def _build_risk_assessment_prompt(self, patient_data: Dict[str, Any]) -> str:
+        """Build prompt for risk assessment"""
+        return f"""You are a medical AI analyzing patient risk factors.
+
+Patient Data:
+- Age: {patient_data.get('age', 'unknown')}
+- Recent Symptoms: {patient_data.get('symptoms', 'none reported')}
+- Medical History: {patient_data.get('medical_history', 'none available')}
+- Recent Vitals: {patient_data.get('vitals', 'none available')}
+
+Assess the patient's risk level (low, medium, high, critical) and provide:
+1. Risk level with confidence score
+2. Key risk factors identified
+3. Recommendations for care
+4. Suggested follow-up timeline
+
+Provide a structured medical assessment."""
+    
+    def _build_triage_prompt(self, patient_info: Dict[str, Any]) -> str:
+        """Build prompt for patient triage"""
+        return f"""You are a medical triage AI assistant.
+
+Patient Information:
+- Symptoms: {patient_info.get('symptoms', 'not provided')}
+- Pain Level: {patient_info.get('pain_level', 'not provided')}
+- Duration: {patient_info.get('symptom_duration', 'not provided')}
+- Age: {patient_info.get('age', 'not provided')}
+
+Determine:
+1. Priority level (low, medium, high, critical)
+2. Care category (general, urgent care, emergency)
+3. Estimated wait time appropriateness
+4. Immediate recommendations
+
+Provide structured triage assessment."""
+    
+    def _parse_risk_response(self, response_text: str) -> Dict[str, Any]:
+        """Parse AI risk assessment response"""
+        # Simple parsing - in production, use more sophisticated NLP
+        risk_level = "medium"
+        if "high" in response_text.lower() or "critical" in response_text.lower():
+            risk_level = "high"
+        elif "low" in response_text.lower():
+            risk_level = "low"
+        
+        return {
+            "risk_level": risk_level,
+            "confidence": 0.75,
+            "reasoning": response_text[:200],
+            "recommendations": self._extract_recommendations(response_text)
+        }
+    
+    def _parse_symptom_response(self, response_text: str) -> Dict[str, Any]:
+        """Parse AI symptom analysis response"""
+        severity = "moderate"
+        if "severe" in response_text.lower() or "critical" in response_text.lower():
+            severity = "severe"
+        elif "mild" in response_text.lower():
+            severity = "mild"
+        
+        return {
+            "severity": severity,
+            "possible_conditions": self._extract_conditions(response_text),
+            "urgency": self._extract_urgency(response_text),
+            "recommendations": self._extract_recommendations(response_text)
+        }
+    
+    def _parse_triage_response(self, response_text: str) -> Dict[str, Any]:
+        """Parse AI triage response"""
+        priority = "medium"
+        if "critical" in response_text.lower() or "emergency" in response_text.lower():
+            priority = "critical"
+        elif "high" in response_text.lower() or "urgent" in response_text.lower():
+            priority = "high"
+        elif "low" in response_text.lower():
+            priority = "low"
+        
+        return {
+            "priority": priority,
+            "category": self._extract_category(response_text),
+            "wait_time_estimate": "15-30 minutes",
+            "recommendations": self._extract_recommendations(response_text)
+        }
+    
+    def _extract_recommendations(self, text: str) -> List[str]:
+        """Extract recommendations from AI response"""
+        # Simple extraction - look for numbered lists or bullet points
+        recommendations = []
+        lines = text.split('\n')
+        for line in lines:
+            line = line.strip()
+            if line and (line[0].isdigit() or line.startswith('-') or line.startswith('•')):
+                recommendations.append(line.lstrip('0123456789.-• '))
+        
+        if not recommendations:
+            recommendations = ["Consult with healthcare provider for detailed assessment"]
+        
+        return recommendations[:5]  # Return top 5
+    
+    def _extract_conditions(self, text: str) -> List[str]:
+        """Extract possible medical conditions from text"""
+        # Simplified extraction
+        conditions = []
+        common_indicators = ["could be", "possibly", "may indicate", "suggest"]
+        
+        for line in text.lower().split('\n'):
+            for indicator in common_indicators:
+                if indicator in line:
+                    # Extract the condition name (simplified)
+                    parts = line.split(indicator)
+                    if len(parts) > 1:
+                        condition = parts[1].strip().split('.')[0].strip()
+                        if condition:
+                            conditions.append(condition.capitalize())
+        
+        return conditions[:3] if conditions else ["Requires professional evaluation"]
+    
+    def _extract_urgency(self, text: str) -> str:
+        """Extract urgency level from text"""
+        text_lower = text.lower()
+        if "emergency" in text_lower or "immediate" in text_lower:
+            return "emergency"
+        elif "urgent" in text_lower or "soon" in text_lower:
+            return "urgent"
+        elif "non-urgent" in text_lower or "routine" in text_lower:
+            return "non-urgent"
+        return "soon"
+    
+    def _extract_category(self, text: str) -> str:
+        """Extract care category from text"""
+        text_lower = text.lower()
+        if "emergency" in text_lower:
+            return "emergency"
+        elif "urgent care" in text_lower:
+            return "urgent care"
+        return "general"
+
+# Singleton instance
+gemini_service = GeminiService()

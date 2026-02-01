@@ -66,74 +66,59 @@ export default function QuickDiagnosisPage() {
           </div>
         </div>
 
-        {/* Mode Selection or Active Session */}
+        {/* Assessment Card */}
         {mode === null ? (
-          <div className="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto">
-            <Card 
-              className="hover:shadow-xl transition-all cursor-pointer border-2 hover:border-primary"
-              onClick={() => setMode('chat')}
-            >
+          <div className="max-w-2xl mx-auto">
+            <Card className="hover:shadow-xl transition-all border-2 border-primary">
               <CardHeader className="text-center pb-4">
                 <div className="mx-auto mb-4 p-4 bg-primary/10 rounded-full w-fit">
-                  <MessageSquare className="h-12 w-12 text-primary" />
+                  <Activity className="h-12 w-12 text-primary" />
                 </div>
-                <CardTitle className="text-2xl mb-2">Chat Assessment</CardTitle>
-                <CardDescription className="text-base">
-                  Type your symptoms and get AI-powered insights through text conversation
+                <CardTitle className="text-3xl mb-3">Start Your Assessment</CardTitle>
+                <CardDescription className="text-lg">
+                  Get AI-powered insights about your symptoms through our interactive assessment
                 </CardDescription>
               </CardHeader>
-              <CardContent>
-                <ul className="space-y-2 text-sm text-muted-foreground mb-6">
-                  <li className="flex items-center gap-2">
-                    <CheckCircle className="h-4 w-4 text-green-600" />
-                    Easy to use text interface
+              <CardContent className="space-y-6">
+                <ul className="space-y-3 text-muted-foreground">
+                  <li className="flex items-center gap-3">
+                    <CheckCircle className="h-5 w-5 text-green-600 flex-shrink-0" />
+                    <span>100% Free - No account required</span>
                   </li>
-                  <li className="flex items-center gap-2">
-                    <CheckCircle className="h-4 w-4 text-green-600" />
-                    Review conversation history
+                  <li className="flex items-center gap-3">
+                    <CheckCircle className="h-5 w-5 text-green-600 flex-shrink-0" />
+                    <span>Quick and easy symptom questionnaire</span>
                   </li>
-                  <li className="flex items-center gap-2">
-                    <CheckCircle className="h-4 w-4 text-green-600" />
-                    Take your time to explain symptoms
+                  <li className="flex items-center gap-3">
+                    <CheckCircle className="h-5 w-5 text-green-600 flex-shrink-0" />
+                    <span>Get preliminary health insights in minutes</span>
+                  </li>
+                  <li className="flex items-center gap-3">
+                    <CheckCircle className="h-5 w-5 text-green-600 flex-shrink-0" />
+                    <span>Private and secure assessment</span>
                   </li>
                 </ul>
-                <Button className="w-full" size="lg">
-                  Start Chat Assessment
-                </Button>
-              </CardContent>
-            </Card>
-
-            <Card 
-              className="hover:shadow-xl transition-all cursor-pointer border-2 hover:border-primary"
-              onClick={() => setMode('voice')}
-            >
-              <CardHeader className="text-center pb-4">
-                <div className="mx-auto mb-4 p-4 bg-primary/10 rounded-full w-fit">
-                  <Phone className="h-12 w-12 text-primary" />
+                
+                <a 
+                  href="https://tally.so/r/Xx0DjP" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="block"
+                >
+                  <Button className="w-full" size="lg">
+                    <MessageSquare className="h-5 w-5 mr-2" />
+                    Begin Assessment
+                  </Button>
+                </a>
+                
+                <div className="text-center pt-4 border-t">
+                  <p className="text-sm text-muted-foreground">
+                    OR Text <span className="font-semibold">HEALTH</span> to{' '}
+                    <a href="tel:13135727768" className="text-primary hover:underline font-semibold">
+                      (313) 572-7768
+                    </a>
+                  </p>
                 </div>
-                <CardTitle className="text-2xl mb-2">Voice Call</CardTitle>
-                <CardDescription className="text-base">
-                  Speak naturally about your symptoms in a conversational AI call
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ul className="space-y-2 text-sm text-muted-foreground mb-6">
-                  <li className="flex items-center gap-2">
-                    <CheckCircle className="h-4 w-4 text-green-600" />
-                    Natural conversation flow
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <CheckCircle className="h-4 w-4 text-green-600" />
-                    Hands-free assessment
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <CheckCircle className="h-4 w-4 text-green-600" />
-                    Real-time AI interaction
-                  </li>
-                </ul>
-                <Button className="w-full" size="lg" variant="outline">
-                  Start Voice Call
-                </Button>
               </CardContent>
             </Card>
           </div>

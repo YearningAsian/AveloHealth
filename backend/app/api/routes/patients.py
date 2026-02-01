@@ -133,3 +133,66 @@ async def get_high_risk_patients(
     except Exception as e:
         error = HIPAACompliance.sanitize_error_message(e)
         raise HTTPException(status_code=500, detail=error)
+    
+class PatientCallRequest(BaseModel):
+    name: str
+    age: int
+    phone: str
+    location: str
+    symptoms: str
+
+@router.post("/calls/submit")
+async def submit_patient_call(
+    data: PatientCallRequest,
+    request: Request
+):
+    """Submit a patient call (no auth required for testing)"""
+    snowflake: SnowflakeClient = request.app.state.snowflake
+    
+    try:
+        result = await snowflake.insert_patient_call(
+            name=data.name,
+            age=data.age,
+            phone=data.phone,
+            location=data.location,
+            symptoms=data.symptoms
+        )
+        return {
+            "success": True,
+            "call_id": result["call_id"],
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/calls/list")
+async def get_patient_calls(request: Request):
+    """Get all patient calls (no auth required for testing)"""
+    snowflake: SnowflakeClient = request.app.state.snowflake
+    
+    try:
+        calls = await snowflake.get_patient_calls()
+        return {
+            "success": True,
+            "data": calls,
+            "count": len(calls),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/calls/summaries")
+async def get_ai_summaries(request: Request):
+    """Get AI-generated summaries for patient calls"""
+    snowflake: SnowflakeClient = request.app.state.snowflake
+    
+    try:
+        summaries = await snowflake.get_ai_patient_summaries()
+        return {
+            "success": True,
+            "data": summaries,
+            "count": len(summaries),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

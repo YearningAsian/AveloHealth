@@ -9,7 +9,7 @@
     "start": "next start",
     "lint": "next lint",
     "type-check": "tsc --noEmit",
-    "backend": "cd backend && uvicorn main:app --reload --host 0.0.0.0 --port 8000"
+    "backend": "./run-backend.sh"
   },
   "dependencies": {
     "@radix-ui/react-progress": "^1.1.2",
