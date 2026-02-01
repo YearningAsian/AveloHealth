@@ -3,10 +3,20 @@
 echo "🚀 AveloHealth CRM Setup Script"
 echo "================================"
 echo ""
+echo "This script will set up your AveloHealth development environment"
+echo "Required: Node.js 18+, Python 3.9+"
+echo ""
 
 # Check Node.js
 if ! command -v node &> /dev/null; then
     echo "❌ Node.js is not installed. Please install Node.js 18+ first."
+    echo "   Visit: https://nodejs.org/"
+    exit 1
+fi
+
+NODE_VERSION=$(node --version | cut -d'v' -f2 | cut -d'.' -f1)
+if [ "$NODE_VERSION" -lt 18 ]; then
+    echo "❌ Node.js version must be 18 or higher. Current: $(node --version)"
     exit 1
 fi
 echo "✅ Node.js $(node --version) detected"
@@ -14,13 +24,22 @@ echo "✅ Node.js $(node --version) detected"
 # Check Python
 if ! command -v python3 &> /dev/null; then
     echo "❌ Python 3 is not installed. Please install Python 3.9+ first."
+    echo "   Visit: https://www.python.org/downloads/"
     exit 1
 fi
 echo "✅ Python $(python3 --version) detected"
 
+# Check npm
+if ! command -v npm &> /dev/null; then
+    echo "❌ npm is not installed. Please install npm first."
+    exit 1
+fi
+echo "✅ npm $(npm --version) detected"
+
 # Install frontend dependencies
 echo ""
 echo "📦 Installing frontend dependencies..."
+echo "   Packages: Next.js 16.1.6, React 19.2.4, Tailwind CSS 4.1.18"
 npm install
 
 if [ $? -ne 0 ]; then
