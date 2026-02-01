@@ -110,6 +110,15 @@ export default function QuickDiagnosisPage() {
                     Begin Assessment
                   </Button>
                 </a>
+                
+                <div className="text-center pt-4 border-t">
+                  <p className="text-sm text-muted-foreground">
+                    OR Text <span className="font-semibold">HEALTH</span> to{' '}
+                    <a href="tel:13135727768" className="text-primary hover:underline font-semibold">
+                      (313) 572-7768
+                    </a>
+                  </p>
+                </div>
               </CardContent>
             </Card>
           </div>
