@@ -34,9 +34,9 @@ export function Header() {
             </button>
             
             {solutionsOpen && (
-              <div className="absolute top-full left-0 mt-2 w-56 bg-background border rounded-lg shadow-lg overflow-hidden">
+              <div className="absolute top-full left-0 mt-6 w-56 bg-background border rounded-lg shadow-lg overflow-hidden z-50">
                 <Link 
-                  href="/solutions/crm"
+                  href="/crm"
                   className="block px-4 py-3 hover:bg-muted transition-colors"
                 >
                   <div className="font-medium text-sm">CRM Platform</div>
@@ -45,7 +45,7 @@ export function Header() {
                   </div>
                 </Link>
                 <Link 
-                  href="/solutions/quick-diagnosis"
+                  href="/quick-diagnosis"
                   className="block px-4 py-3 hover:bg-muted transition-colors border-t"
                 >
                   <div className="font-medium text-sm">QuickDiagnosis</div>

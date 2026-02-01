@@ -1,8 +1,21 @@
 import snowflake.connector
 import os
 from dotenv import load_dotenv
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv()
+
+app = FastAPI()
+
+# Enable CORS for frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 def send_to_snowflake(name, age, phone, location, symptoms):
     conn = snowflake.connector.connect(
@@ -25,5 +38,14 @@ def send_to_snowflake(name, age, phone, location, symptoms):
     finally:
         conn.close()
 
-send_to_snowflake("Gabe G", 20, "517-555-0199", "East Lansing, Michigan", "High fever and a sore throat.")
-send_to_snowflake("Jake H", 31, "210-978-1101", "Los Angeles, California", "Red bumps on neck. Feels chilly.")
+@app.get("/")
+def read_root():
+    return {"status": "AveloHealth API is running"}
+
+@app.get("/health")
+def health_check():
+    return {"status": "healthy"}
+
+# Commented out test calls - only run these manually when needed
+# send_to_snowflake("Gabe G", 20, "517-555-0199", "East Lansing, Michigan", "High fever and a sore throat.")
+# send_to_snowflake("Jake H", 31, "210-978-1101", "Los Angeles, California", "Red bumps on neck. Feels chilly.")
