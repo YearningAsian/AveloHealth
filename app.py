@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-def send_to_snowflake(name, age, phone, symptoms):
+def send_to_snowflake(name, age, phone, location, symptoms):
     conn = snowflake.connector.connect(
         user=os.getenv('SNOWFLAKE_USER'),
         password=os.getenv('SNOWFLAKE_PASSWORD'),
@@ -14,10 +14,10 @@ def send_to_snowflake(name, age, phone, symptoms):
         schema='PUBLIC'
     )
     cursor = conn.cursor()
-    sql = "INSERT INTO AVELOHEALTH.PUBLIC.PATIENT_CALLS (CALL_ID, PATIENT_NAME, PATIENT_AGE, PHONE_NUMBER, SYMPTOM_DESCRIPTION) VALUES (%s, %s, %s, %s, %s)"
+    sql = "INSERT INTO AVELOHEALTH.PUBLIC.PATIENT_CALLS (CALL_ID, PATIENT_NAME, PATIENT_AGE, PHONE_NUMBER, PATIENT_LOCATION, SYMPTOM_DESCRIPTION) VALUES (%s, %s, %s, %s, %s, %s)"
     call_id = "call_" + str(hash(phone))
     try:
-        cursor.execute(sql, (call_id, name, age, phone, symptoms))
+        cursor.execute(sql, (call_id, name, age, phone, location, symptoms))
         conn.commit()
         print(f"Successfully checked in: {name}")
     except Exception as e:
@@ -25,4 +25,5 @@ def send_to_snowflake(name, age, phone, symptoms):
     finally:
         conn.close()
 
-send_to_snowflake("Gabe G", 20, "517-555-0199", "High fever and a sore throat.")
+send_to_snowflake("Gabe G", 20, "517-555-0199", "East Lansing, Michigan", "High fever and a sore throat.")
+send_to_snowflake("Jake H", 31, "210-978-1101", "Los Angeles, California", "Red bumps on neck. Feels chilly.")
