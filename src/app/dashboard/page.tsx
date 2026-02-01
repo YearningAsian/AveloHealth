@@ -1,0 +1,2005 @@
+"use client";
+
+import React, { useState, useEffect, useMemo } from "react";
+import { useRouter } from "next/navigation";
+import { Logo } from "@/components/Logo";
+import { Footer } from "@/components/Footer";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
+import { getMockDashboardData, type DashboardData } from "@/lib/api";
+import { calculateAge, formatDate, getSeverityColor, getSeverityBgClass } from "@/lib/utils";
+import {
+  LogOut,
+  Calendar,
+  Activity,
+  Filter,
+  ChevronDown,
+  ChevronUp,
+  Plus,
+  ChevronLeft,
+  ChevronRight,
+  Sparkles,
+  Brain,
+  Edit,
+  X,
+  Upload,
+  Heart,
+  CheckCircle,
+  Clock,
+  MapPin,
+  Phone,
+  PhoneOff,
+  RefreshCw,
+  Undo2,
+
+  Bell,
+  BellOff,
+} from "lucide-react";
+import {
+  LineChart,
+  Line,
+  PieChart,
+  Pie,
+  Cell,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+} from "recharts";
+
+type SeverityFilter = "all" | "high" | "medium" | "low";
+type DateSort = "newest" | "oldest";
+type DateRange = "1week" | "1month" | "3months" | "1year" | "custom" | "all";
+type AppointmentStatus = "upcoming" | "done" | "cancelled" | "cancellation_in_progress" | "cancellation_failed" | "rescheduling_in_progress" | "rescheduling_failed" | "rescheduled";
+
+interface Appointment {
+  id: string;
+  title: string;
+  providerName: string;
+  providerPhone: string;
+  location: string;
+  date: string;
+  time: string;
+  status: AppointmentStatus;
+  previousStatus?: AppointmentStatus;
+  reminderEnabled: boolean;
+  canUndo?: boolean;
+}
+
+export default function DashboardPage() {
+  const router = useRouter();
+  const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Table filters
+  const [severityFilter, setSeverityFilter] = useState<SeverityFilter>("all");
+  const [dateSort, setDateSort] = useState<DateSort>("newest");
+  const [showTableFilters, setShowTableFilters] = useState(false);
+
+  // Chart filters
+  const [chartDateRange, setChartDateRange] = useState<DateRange>("1month");
+  const [chartSeverityFilter, setChartSeverityFilter] = useState<SeverityFilter>("all");
+  const [customStartDate, setCustomStartDate] = useState<string>("");
+  const [customEndDate, setCustomEndDate] = useState<string>("");
+
+  // UI state
+  const [showChartFilters, setShowChartFilters] = useState(true);
+  const [showEditProfile, setShowEditProfile] = useState(false);
+  
+  // Edit profile state
+  const [editFamilyHistory, setEditFamilyHistory] = useState<string[]>([]);
+  const [profileImage, setProfileImage] = useState<string | null>(null);
+  
+  // Add Entry state
+  const [showAddEntry, setShowAddEntry] = useState(false);
+  const [selectedSymptom, setSelectedSymptom] = useState("");
+  const [customSymptom, setCustomSymptom] = useState("");
+  const [symptomSearch, setSymptomSearch] = useState("");
+  const [entrySeverity, setEntrySeverity] = useState<"low" | "medium" | "high">("low");
+  const [entryNote, setEntryNote] = useState("");
+  
+  // Toast notifications
+  const [showEntryConfirmation, setShowEntryConfirmation] = useState(false);
+  const [showChangesSaved, setShowChangesSaved] = useState(false);
+  const [showReportGenerated, setShowReportGenerated] = useState(false);
+  const [showLoggedOut, setShowLoggedOut] = useState(false);
+  const [showAppointmentAdded, setShowAppointmentAdded] = useState(false);
+  
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const entriesPerPage = 5;
+  
+  // Appointments state
+  const [appointments, setAppointments] = useState<Appointment[]>([
+    {
+      id: "1",
+      title: "Annual Physical",
+      providerName: "Dr. Sarah Johnson",
+      providerPhone: "(555) 123-4567",
+      location: "123 Medical Center Dr, Suite 200",
+      date: "2026-02-05",
+      time: "10:00",
+      status: "upcoming",
+      reminderEnabled: true,
+    },
+    {
+      id: "2",
+      title: "Cardiology Follow-up",
+      providerName: "Dr. Michael Chen",
+      providerPhone: "(555) 987-6543",
+      location: "456 Heart Health Blvd",
+      date: "2026-02-15",
+      time: "14:30",
+      status: "upcoming",
+      reminderEnabled: true,
+    },
+    {
+      id: "3",
+      title: "Dermatology Checkup",
+      providerName: "Dr. Emily White",
+      providerPhone: "(555) 456-7890",
+      location: "Virtual",
+      date: "2026-01-20",
+      time: "09:00",
+      status: "done",
+      reminderEnabled: false,
+    },
+  ]);
+  const [showAddAppointment, setShowAddAppointment] = useState(false);
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [showRescheduleModal, setShowRescheduleModal] = useState(false);
+  const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
+  const [appointmentStatusFilter, setAppointmentStatusFilter] = useState<"all" | AppointmentStatus>("all");
+  
+  // New appointment form
+  const [newAppointment, setNewAppointment] = useState({
+    title: "",
+    providerName: "",
+    providerPhone: "",
+    location: "",
+    date: "",
+    time: "",
+    reminderEnabled: true,
+  });
+  
+  // Cancel/Reschedule form
+  const [actionForm, setActionForm] = useState({
+    preferredCallHour: 10,
+    newDate: "",
+    newTime: "",
+  });
+  
+  // Family health history options
+  const familyHistoryOptions = [
+    "Diabetes", "Heart Disease", "High Blood Pressure", "Cancer", 
+    "Depression", "Anxiety", "Alzheimer's", "Asthma", 
+    "Arthritis", "Stroke", "Thyroid Disorder", "None"
+  ];
+  
+  // Common symptoms with recommended severity
+  const commonSymptoms: { name: string; recommendedSeverity: "low" | "medium" | "high" }[] = [
+    { name: "Headache", recommendedSeverity: "low" },
+    { name: "Migraine", recommendedSeverity: "high" },
+    { name: "Fatigue", recommendedSeverity: "low" },
+    { name: "Fever", recommendedSeverity: "medium" },
+    { name: "High Fever (>103°F)", recommendedSeverity: "high" },
+    { name: "Cough", recommendedSeverity: "low" },
+    { name: "Persistent Cough", recommendedSeverity: "medium" },
+    { name: "Shortness of Breath", recommendedSeverity: "high" },
+    { name: "Chest Pain", recommendedSeverity: "high" },
+    { name: "Back Pain", recommendedSeverity: "medium" },
+    { name: "Joint Pain", recommendedSeverity: "medium" },
+    { name: "Muscle Aches", recommendedSeverity: "low" },
+    { name: "Nausea", recommendedSeverity: "low" },
+    { name: "Vomiting", recommendedSeverity: "medium" },
+    { name: "Diarrhea", recommendedSeverity: "medium" },
+    { name: "Constipation", recommendedSeverity: "low" },
+    { name: "Stomach Pain", recommendedSeverity: "medium" },
+    { name: "Dizziness", recommendedSeverity: "medium" },
+    { name: "Fainting", recommendedSeverity: "high" },
+    { name: "Blurred Vision", recommendedSeverity: "medium" },
+    { name: "Sore Throat", recommendedSeverity: "low" },
+    { name: "Runny Nose", recommendedSeverity: "low" },
+    { name: "Congestion", recommendedSeverity: "low" },
+    { name: "Sneezing", recommendedSeverity: "low" },
+    { name: "Ear Pain", recommendedSeverity: "medium" },
+    { name: "Skin Rash", recommendedSeverity: "medium" },
+    { name: "Itching", recommendedSeverity: "low" },
+    { name: "Swelling", recommendedSeverity: "medium" },
+    { name: "Numbness", recommendedSeverity: "medium" },
+    { name: "Tingling", recommendedSeverity: "low" },
+    { name: "Anxiety", recommendedSeverity: "medium" },
+    { name: "Depression", recommendedSeverity: "medium" },
+    { name: "Insomnia", recommendedSeverity: "low" },
+    { name: "Loss of Appetite", recommendedSeverity: "low" },
+    { name: "Weight Loss", recommendedSeverity: "medium" },
+    { name: "Difficulty Swallowing", recommendedSeverity: "high" },
+    { name: "Heart Palpitations", recommendedSeverity: "high" },
+    { name: "Cold Sweats", recommendedSeverity: "medium" },
+    { name: "Night Sweats", recommendedSeverity: "medium" },
+    { name: "Chills", recommendedSeverity: "low" },
+  ];
+  
+  // Filter symptoms based on search
+  const filteredSymptoms = commonSymptoms.filter(s => 
+    s.name.toLowerCase().includes(symptomSearch.toLowerCase())
+  );
+
+  useEffect(() => {
+    // Check authentication
+    const token = localStorage.getItem("auth_token");
+    if (!token) {
+      router.push("/");
+      return;
+    }
+
+    // Load dashboard data
+    const loadData = async () => {
+      try {
+        // In production, call the API
+        // const data = await dashboardAPI.getDashboardData();
+        const data = getMockDashboardData();
+        setDashboardData(data);
+      } catch (error) {
+        console.error("Failed to load dashboard data:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadData();
+  }, [router]);
+
+  const handleLogout = () => {
+    localStorage.removeItem("auth_token");
+    localStorage.removeItem("user");
+    setShowLoggedOut(true);
+    setTimeout(() => {
+      router.push("/");
+    }, 1500);
+  };
+
+  // Appointment helpers
+  const formatTime = (time: string) => {
+    const [hours, minutes] = time.split(":");
+    const h = parseInt(hours);
+    const ampm = h >= 12 ? "PM" : "AM";
+    const displayHour = h % 12 || 12;
+    return `${displayHour}:${minutes} ${ampm}`;
+  };
+
+  const formatAppointmentDate = (dateStr: string) => {
+    const date = new Date(dateStr);
+    const today = new Date();
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    
+    if (date.toDateString() === today.toDateString()) return "Today";
+    if (date.toDateString() === tomorrow.toDateString()) return "Tomorrow";
+    
+    return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  };
+
+  const getStatusBadge = (status: AppointmentStatus) => {
+    const styles: Record<AppointmentStatus, { bg: string; text: string; label: string }> = {
+      upcoming: { bg: "bg-blue-100", text: "text-blue-700", label: "Upcoming" },
+      done: { bg: "bg-green-100", text: "text-green-700", label: "Done" },
+      cancelled: { bg: "bg-gray-100", text: "text-gray-700", label: "Cancelled" },
+      cancellation_in_progress: { bg: "bg-orange-100", text: "text-orange-700", label: "Cancelling..." },
+      cancellation_failed: { bg: "bg-red-100", text: "text-red-700", label: "Cancel Failed" },
+      rescheduling_in_progress: { bg: "bg-purple-100", text: "text-purple-700", label: "Rescheduling..." },
+      rescheduling_failed: { bg: "bg-red-100", text: "text-red-700", label: "Reschedule Failed" },
+      rescheduled: { bg: "bg-teal-100", text: "text-teal-700", label: "Rescheduled" },
+    };
+    const style = styles[status];
+    return (
+      <span className={`px-2 py-1 rounded-full text-xs font-medium ${style.bg} ${style.text}`}>
+        {style.label}
+      </span>
+    );
+  };
+
+  // Get next upcoming appointment
+  const nextAppointment = appointments
+    .filter(a => a.status === "upcoming" && new Date(a.date) >= new Date())
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())[0];
+
+  // Filter appointments
+  const filteredAppointments = appointments.filter(a => 
+    appointmentStatusFilter === "all" || a.status === appointmentStatusFilter
+  );
+
+  // Appointment handlers
+  const handleAddAppointment = () => {
+    if (!newAppointment.title || !newAppointment.date || !newAppointment.time) return;
+    
+    const appointment: Appointment = {
+      id: Date.now().toString(),
+      ...newAppointment,
+      status: "upcoming",
+    };
+    
+    setAppointments(prev => [...prev, appointment]);
+    setShowAddAppointment(false);
+    setNewAppointment({
+      title: "",
+      providerName: "",
+      providerPhone: "",
+      location: "",
+      date: "",
+      time: "",
+      reminderEnabled: true,
+    });
+    setShowAppointmentAdded(true);
+    setTimeout(() => setShowAppointmentAdded(false), 5000);
+  };
+
+  const handleCancelAppointment = (appointment: Appointment) => {
+    setSelectedAppointment(appointment);
+    setShowCancelModal(true);
+  };
+
+  const handleRescheduleAppointment = (appointment: Appointment) => {
+    setSelectedAppointment(appointment);
+    setShowRescheduleModal(true);
+  };
+
+  const submitCancellation = () => {
+    if (!selectedAppointment) return;
+    
+    setAppointments(prev => prev.map(a => 
+      a.id === selectedAppointment.id 
+        ? { ...a, status: "cancellation_in_progress" as AppointmentStatus, previousStatus: a.status, canUndo: true }
+        : a
+    ));
+    
+    setShowCancelModal(false);
+    setSelectedAppointment(null);
+  };
+
+  const submitReschedule = () => {
+    if (!selectedAppointment || !actionForm.newDate || !actionForm.newTime) return;
+    
+    setAppointments(prev => prev.map(a => 
+      a.id === selectedAppointment.id 
+        ? { ...a, status: "rescheduling_in_progress" as AppointmentStatus, previousStatus: a.status, canUndo: true }
+        : a
+    ));
+    
+    setShowRescheduleModal(false);
+    setSelectedAppointment(null);
+    setActionForm({ preferredCallHour: 10, newDate: "", newTime: "" });
+  };
+
+  const handleUndoAction = (appointment: Appointment) => {
+    if (!appointment.canUndo || !appointment.previousStatus) return;
+    
+    setAppointments(prev => prev.map(a => 
+      a.id === appointment.id 
+        ? { ...a, status: appointment.previousStatus as AppointmentStatus, previousStatus: undefined, canUndo: false }
+        : a
+    ));
+  };
+
+  const toggleReminder = (appointmentId: string) => {
+    setAppointments(prev => prev.map(a => 
+      a.id === appointmentId ? { ...a, reminderEnabled: !a.reminderEnabled } : a
+    ));
+  };
+
+  // Filter and sort entries for table
+  const allFilteredEntries = useMemo(() => {
+    if (!dashboardData) return [];
+
+    let entries = [...dashboardData.recentEntries];
+
+    // Filter by severity
+    if (severityFilter !== "all") {
+      entries = entries.filter((e) => e.severity === severityFilter);
+    }
+
+    // Sort by date
+    entries.sort((a, b) => {
+      const dateA = new Date(a.date).getTime();
+      const dateB = new Date(b.date).getTime();
+      return dateSort === "newest" ? dateB - dateA : dateA - dateB;
+    });
+
+    return entries;
+  }, [dashboardData, severityFilter, dateSort]);
+
+  // Paginated entries
+  const filteredEntries = useMemo(() => {
+    const startIndex = (currentPage - 1) * entriesPerPage;
+    return allFilteredEntries.slice(startIndex, startIndex + entriesPerPage);
+  }, [allFilteredEntries, currentPage, entriesPerPage]);
+
+  // Total pages
+  const totalPages = Math.ceil(allFilteredEntries.length / entriesPerPage);
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [severityFilter, dateSort]);
+
+  // Get date range for charts
+  const getDateRangeFilter = (): { start: Date; end: Date } => {
+    const end = new Date();
+    let start = new Date();
+
+    switch (chartDateRange) {
+      case "1week":
+        start.setDate(end.getDate() - 7);
+        break;
+      case "1month":
+        start.setMonth(end.getMonth() - 1);
+        break;
+      case "3months":
+        start.setMonth(end.getMonth() - 3);
+        break;
+      case "1year":
+        start.setFullYear(end.getFullYear() - 1);
+        break;
+      case "custom":
+        if (customStartDate && customEndDate) {
+          start = new Date(customStartDate);
+          return { start, end: new Date(customEndDate) };
+        }
+        start.setMonth(end.getMonth() - 1);
+        break;
+      case "all":
+        // Use first entry date as start
+        if (dashboardData && dashboardData.recentEntries.length > 0) {
+          const dates = dashboardData.recentEntries.map(e => new Date(e.date).getTime());
+          start = new Date(Math.min(...dates));
+        } else {
+          start.setFullYear(end.getFullYear() - 1);
+        }
+        break;
+    }
+
+    return { start, end };
+  };
+
+  // Filter chart data
+  const filteredChartData = useMemo(() => {
+    if (!dashboardData) return { lineData: [], pieData: [] };
+
+    const { start, end } = getDateRangeFilter();
+
+    // Filter entries by date range and severity only (removed category filter)
+    let filteredEntries = dashboardData.recentEntries.filter((entry) => {
+      const entryDate = new Date(entry.date);
+      const inDateRange = entryDate >= start && entryDate <= end;
+      const matchesSeverity = chartSeverityFilter === "all" || entry.severity === chartSeverityFilter;
+      return inDateRange && matchesSeverity;
+    });
+
+    // Generate line chart data
+    const lineData: { date: string; high: number; medium: number; low: number; total: number }[] = [];
+    const dayCount = Math.ceil((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000));
+    const interval = dayCount > 60 ? 7 : dayCount > 14 ? 3 : 1;
+
+    for (let i = 0; i <= dayCount; i += interval) {
+      const date = new Date(start.getTime() + i * 24 * 60 * 60 * 1000);
+      const nextDate = new Date(start.getTime() + (i + interval) * 24 * 60 * 60 * 1000);
+
+      const periodEntries = filteredEntries.filter((e) => {
+        const eDate = new Date(e.date);
+        return eDate >= date && eDate < nextDate;
+      });
+
+      lineData.push({
+        date: date.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+        high: periodEntries.filter((e) => e.severity === "high").length,
+        medium: periodEntries.filter((e) => e.severity === "medium").length,
+        low: periodEntries.filter((e) => e.severity === "low").length,
+        total: periodEntries.length,
+      });
+    }
+
+    // Generate pie chart data by SYMPTOMS (not category)
+    const symptomMap = new Map<string, number>();
+    filteredEntries.forEach((entry) => {
+      // Split symptoms by comma and count each
+      const symptoms = entry.symptoms.split(",").map(s => s.trim());
+      symptoms.forEach(symptom => {
+        if (symptom) {
+          symptomMap.set(symptom, (symptomMap.get(symptom) || 0) + 1);
+        }
+      });
+    });
+
+    const pieData = Array.from(symptomMap.entries()).map(([name, value]) => ({
+      name,
+      value,
+    }));
+
+    return { lineData, pieData };
+  }, [dashboardData, chartDateRange, chartSeverityFilter, customStartDate, customEndDate]);
+
+  // Get unique symptoms for reference
+  const uniqueSymptoms = useMemo(() => {
+    if (!dashboardData) return [];
+    const symptoms = new Set<string>();
+    dashboardData.recentEntries.forEach(e => {
+      e.symptoms.split(",").map(s => s.trim()).forEach(s => {
+        if (s) symptoms.add(s);
+      });
+    });
+    return Array.from(symptoms);
+  }, [dashboardData]);
+
+  const PIE_COLORS = ["#2dd4bf", "#22c55e", "#eab308", "#f97316", "#ef4444", "#8b5cf6", "#ec4899"];
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-[hsl(174,62%,47%)] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-gray-600">Loading your dashboard...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!dashboardData) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <p className="text-gray-600">Failed to load dashboard data.</p>
+          <Button onClick={() => router.push("/")} className="mt-4">
+            Return Home
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  const { user, stats } = dashboardData;
+  const age = calculateAge(user.dateOfBirth);
+
+  return (
+    <div className="min-h-screen flex flex-col bg-gray-50">
+      {/* Header */}
+      <header className="bg-white shadow-sm sticky top-0 z-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-16">
+            <Logo size="md" />
+            
+            <div className="flex items-center gap-3">
+              <Button 
+                className="flex items-center gap-2 bg-blue-500 hover:bg-blue-600 text-white"
+                onClick={() => setShowAddAppointment(true)}
+              >
+                <Calendar size={18} />
+                <span className="hidden sm:inline">Add Appointment</span>
+              </Button>
+              
+              <Button 
+                className="flex items-center gap-2 bg-green-500 hover:bg-green-600 text-white"
+                onClick={() => {
+                  setShowAddEntry(true);
+                  setSelectedSymptom("");
+                  setCustomSymptom("");
+                  setSymptomSearch("");
+                  setEntrySeverity("low");
+                }}
+              >
+                <Plus size={18} />
+                <span className="hidden sm:inline">Add Entry</span>
+              </Button>
+              
+              <Button variant="outline" onClick={handleLogout} className="flex items-center gap-2">
+                <LogOut size={18} />
+                <span className="hidden sm:inline">Log Out</span>
+              </Button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <main className="flex-1 py-8">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
+          {/* User Summary Card */}
+          <Card className="animate-fade-in overflow-hidden">
+            <div className="bg-gradient-to-r from-[hsl(174,62%,47%)] to-[hsl(174,62%,37%)] px-6 py-4 flex items-center justify-between">
+              <h2 className="text-xl font-semibold text-white">Patient Summary</h2>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="text-white hover:bg-white/20"
+                onClick={() => setShowEditProfile(true)}
+              >
+                <Edit size={16} className="mr-2" />
+                Edit Profile
+              </Button>
+            </div>
+            <CardContent className="p-6">
+              <div className="flex flex-col md:flex-row md:items-start gap-6">
+                {/* Avatar and basic info */}
+                <div className="flex items-center gap-4">
+                  <div className="w-20 h-20 rounded-full bg-gradient-to-br from-[hsl(174,62%,47%)] to-[hsl(174,62%,37%)] flex items-center justify-center text-white text-3xl font-bold shadow-lg overflow-hidden">
+                    {profileImage ? (
+                      <img src={profileImage} alt="Profile" className="w-full h-full object-cover" />
+                    ) : (
+                      user.name.charAt(0)
+                    )}
+                  </div>
+                  <div>
+                    <h3 className="text-2xl font-bold text-gray-900">{user.name}</h3>
+                    <div className="flex items-center gap-4 text-gray-600 mt-1">
+                      <span className="flex items-center gap-1">
+                        <Calendar size={16} />
+                        {formatDate(user.dateOfBirth)} ({age} years old)
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Stats and Family Health History */}
+                <div className="flex-1 md:ml-auto md:max-w-xl">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="p-3 bg-pink-50 rounded-lg">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Heart size={16} className="text-pink-500" />
+                        <p className="text-sm font-semibold text-gray-700">Family Health History</p>
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        {editFamilyHistory.length > 0 ? (
+                          editFamilyHistory.map((item) => (
+                            <span key={item} className="text-xs bg-white px-2 py-0.5 rounded-full text-gray-600">
+                              {item}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-xs text-gray-500">Not specified</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="text-center p-3 bg-gray-50 rounded-lg">
+                      <p className="text-3xl font-bold text-[hsl(174,62%,47%)]">{stats.totalEntries}</p>
+                      <p className="text-xs text-gray-500">Total Entries</p>
+                    </div>
+                    
+                    {/* Next Appointment */}
+                    <div className="p-3 bg-blue-50 rounded-lg">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Calendar size={14} className="text-blue-600" />
+                        <p className="text-xs font-semibold text-blue-700">Next Appointment</p>
+                      </div>
+                      {nextAppointment ? (
+                        <div>
+                          <p className="text-sm font-medium text-gray-800">{nextAppointment.title}</p>
+                          <p className="text-xs text-gray-600">{nextAppointment.providerName}</p>
+                          <div className="flex items-center gap-2 mt-1 text-xs text-blue-700">
+                            <span className="font-medium">{formatAppointmentDate(nextAppointment.date)}</span>
+                            <span>•</span>
+                            <span>{formatTime(nextAppointment.time)}</span>
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-gray-500">No upcoming appointments</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Entries Table */}
+          <Card className="animate-fade-in delay-150">
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="flex items-center gap-2">
+                <Activity size={20} className="text-[hsl(174,62%,47%)]" />
+                Entries
+              </CardTitle>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowTableFilters(!showTableFilters)}
+                  className="flex items-center gap-1"
+                >
+                  <Filter size={16} />
+                  Filters
+                  {showTableFilters ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                </Button>
+              </div>
+            </CardHeader>
+
+            {showTableFilters && (
+              <div className="px-6 pb-4 flex flex-wrap gap-4">
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Severity</label>
+                  <Select
+                    value={severityFilter}
+                    onChange={(e) => setSeverityFilter(e.target.value as SeverityFilter)}
+                    options={[
+                      { value: "all", label: "All Severities" },
+                      { value: "high", label: "High" },
+                      { value: "medium", label: "Medium" },
+                      { value: "low", label: "Low" },
+                    ]}
+                    className="w-36"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Sort by Date</label>
+                  <Select
+                    value={dateSort}
+                    onChange={(e) => setDateSort(e.target.value as DateSort)}
+                    options={[
+                      { value: "newest", label: "Newest First" },
+                      { value: "oldest", label: "Oldest First" },
+                    ]}
+                    className="w-36"
+                  />
+                </div>
+              </div>
+            )}
+
+            <CardContent>
+              {filteredEntries.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">
+                  No entries found for the selected filters
+                </div>
+              ) : (
+                <>
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b">
+                          <th className="text-left py-3 px-4 font-medium text-gray-600">Date</th>
+                          <th className="text-left py-3 px-4 font-medium text-gray-600">Symptom</th>
+                          <th className="text-left py-3 px-4 font-medium text-gray-600">Severity</th>
+                          <th className="text-left py-3 px-4 font-medium text-gray-600">Notes</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredEntries.map((entry) => (
+                          <tr key={entry.id} className="border-b hover:bg-gray-50 transition-colors">
+                            <td className="py-3 px-4 text-sm">{formatDate(entry.date)}</td>
+                            <td className="py-3 px-4 text-sm font-medium">{entry.symptoms}</td>
+                            <td className="py-3 px-4">
+                              <span
+                                className={`px-2 py-1 rounded-full text-xs font-medium ${getSeverityBgClass(
+                                  entry.severity
+                                )}`}
+                              >
+                                {entry.severity.charAt(0).toUpperCase() + entry.severity.slice(1)}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-sm text-gray-500 max-w-xs truncate">
+                              {entry.notes || "-"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Pagination */}
+                  {totalPages > 1 && (
+                    <div className="flex items-center justify-between mt-4 pt-4 border-t">
+                      <p className="text-sm text-gray-500">
+                        Showing {(currentPage - 1) * entriesPerPage + 1} to{" "}
+                        {Math.min(currentPage * entriesPerPage, allFilteredEntries.length)} of{" "}
+                        {allFilteredEntries.length} entries
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                          disabled={currentPage === 1}
+                        >
+                          <ChevronLeft size={16} />
+                        </Button>
+                        <span className="text-sm px-3">
+                          Page {currentPage} of {totalPages}
+                        </span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                          disabled={currentPage === totalPages}
+                        >
+                          <ChevronRight size={16} />
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Appointments Table */}
+          <Card className="animate-fade-in delay-175">
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="flex items-center gap-2">
+                <Calendar size={20} className="text-blue-500" />
+                Appointments
+              </CardTitle>
+              <div className="flex items-center gap-2">
+                <Select
+                  value={appointmentStatusFilter}
+                  onChange={(e) => setAppointmentStatusFilter(e.target.value as "all" | AppointmentStatus)}
+                  options={[
+                    { value: "all", label: "All Status" },
+                    { value: "upcoming", label: "Upcoming" },
+                    { value: "done", label: "Done" },
+                    { value: "cancelled", label: "Cancelled" },
+                  ]}
+                  className="w-36"
+                />
+              </div>
+            </CardHeader>
+            <CardContent>
+              {filteredAppointments.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">
+                  No appointments found
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b">
+                        <th className="text-left py-3 px-4 font-medium text-gray-600">Appointment</th>
+                        <th className="text-left py-3 px-4 font-medium text-gray-600">Provider</th>
+                        <th className="text-left py-3 px-4 font-medium text-gray-600">Date & Time</th>
+                        <th className="text-left py-3 px-4 font-medium text-gray-600">Status</th>
+                        <th className="text-left py-3 px-4 font-medium text-gray-600">Reminder</th>
+                        <th className="text-right py-3 px-4 font-medium text-gray-600">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredAppointments.map((appointment) => (
+                        <tr key={appointment.id} className="border-b hover:bg-gray-50 transition-colors">
+                          <td className="py-3 px-4">
+                            <div>
+                              <p className="font-medium text-gray-800">{appointment.title}</p>
+                              <p className="text-xs text-gray-500 flex items-center gap-1 mt-1">
+                                <MapPin size={12} />
+                                {appointment.location}
+                              </p>
+                            </div>
+                          </td>
+                          <td className="py-3 px-4">
+                            <div>
+                              <p className="text-sm text-gray-700">{appointment.providerName}</p>
+                              <p className="text-xs text-gray-500">{appointment.providerPhone}</p>
+                            </div>
+                          </td>
+                          <td className="py-3 px-4">
+                            <div className="flex items-center gap-2 text-sm">
+                              <Calendar size={14} className="text-gray-400" />
+                              <span className="text-gray-700">{formatAppointmentDate(appointment.date)}</span>
+                              <Clock size={14} className="text-gray-400 ml-2" />
+                              <span className="text-gray-700">{formatTime(appointment.time)}</span>
+                            </div>
+                          </td>
+                          <td className="py-3 px-4">
+                            {getStatusBadge(appointment.status)}
+                          </td>
+                          <td className="py-3 px-4">
+                            <button
+                              onClick={() => toggleReminder(appointment.id)}
+                              disabled={appointment.status !== "upcoming"}
+                              className={`p-1.5 rounded-lg transition-colors ${
+                                appointment.status !== "upcoming" 
+                                  ? "opacity-50 cursor-not-allowed" 
+                                  : appointment.reminderEnabled 
+                                    ? "text-[hsl(174,62%,47%)] hover:bg-[hsl(174,62%,95%)]" 
+                                    : "text-gray-400 hover:bg-gray-100"
+                              }`}
+                            >
+                              {appointment.reminderEnabled ? <Bell size={16} /> : <BellOff size={16} />}
+                            </button>
+                          </td>
+                          <td className="py-3 px-4">
+                            <div className="flex items-center justify-end gap-1">
+                              {/* Undo (for in-progress actions) */}
+                              {appointment.canUndo && (appointment.status === "cancellation_in_progress" || appointment.status === "rescheduling_in_progress") && (
+                                <button
+                                  onClick={() => handleUndoAction(appointment)}
+                                  className="p-1.5 text-gray-500 hover:text-orange-600 hover:bg-orange-50 rounded-lg transition-colors"
+                                  title="Undo"
+                                >
+                                  <Undo2 size={16} />
+                                </button>
+                              )}
+                              
+                              {/* Cancel & Reschedule (for upcoming appointments) */}
+                              {appointment.status === "upcoming" && (
+                                <>
+                                  <button
+                                    onClick={() => handleRescheduleAppointment(appointment)}
+                                    className="p-1.5 text-gray-500 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
+                                    title="Reschedule"
+                                  >
+                                    <RefreshCw size={16} />
+                                  </button>
+                                  <button
+                                    onClick={() => handleCancelAppointment(appointment)}
+                                    className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                    title="Cancel"
+                                  >
+                                    <PhoneOff size={16} />
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* AI Recommendations Section */}
+          <Card className="animate-fade-in delay-200 border-l-4 border-l-[hsl(174,62%,47%)]">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <div className="p-2 bg-[hsl(174,62%,47%)]/10 rounded-lg">
+                  <Brain size={20} className="text-[hsl(174,62%,47%)]" />
+                </div>
+                AI Health Insights
+                <span className="ml-auto inline-flex items-center gap-1 px-2 py-1 bg-[hsl(174,62%,47%)]/10 text-[hsl(174,62%,47%)] text-xs font-medium rounded-full">
+                  <Sparkles size={12} />
+                  Powered by AI
+                </span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {/* AI Recommendation based on entries */}
+                <div className="p-4 bg-gradient-to-r from-[hsl(174,62%,95%)] to-white rounded-xl">
+                  <h4 className="font-semibold text-gray-900 mb-2">Based on your recent entries:</h4>
+                  <div className="space-y-3">
+                    {(stats.entriesBySeverity.find(s => s.severity === "High")?.count ?? 0) > 0 && (
+                      <div className="flex items-start gap-3">
+                        <div className="w-2 h-2 mt-2 bg-red-500 rounded-full" />
+                        <div>
+                          <p className="text-sm text-gray-700">
+                            <strong>Priority Alert:</strong> You have {stats.entriesBySeverity.find(s => s.severity === "High")?.count ?? 0} high-severity entries this period. 
+                            Consider scheduling a check-up with your healthcare provider to discuss these symptoms.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                    
+                    <div className="flex items-start gap-3">
+                      <div className="w-2 h-2 mt-2 bg-[hsl(174,62%,47%)] rounded-full" />
+                      <div>
+                        <p className="text-sm text-gray-700">
+                          <strong>Pattern Detected:</strong> Your most common symptoms include {uniqueSymptoms[0] || "various conditions"}. 
+                          Keeping a consistent log helps identify triggers and trends over time.
+                        </p>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-start gap-3">
+                      <div className="w-2 h-2 mt-2 bg-green-500 rounded-full" />
+                      <div>
+                        <p className="text-sm text-gray-700">
+                          <strong>Wellness Tip:</strong> You&apos;ve logged {stats.totalEntries} entries total. 
+                          Regular tracking helps you and your healthcare provider make more informed decisions about your care plan.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Quick action suggestion */}
+                <div className="flex items-center justify-between p-4 bg-gray-50 rounded-xl">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-white rounded-lg shadow-sm">
+                      <Activity size={20} className="text-[hsl(174,62%,47%)]" />
+                    </div>
+                    <div>
+                      <p className="font-medium text-gray-900">Ready to share with your doctor?</p>
+                      <p className="text-sm text-gray-500">Generate a summary report of your recent entries</p>
+                    </div>
+                  </div>
+                  <Button variant="outline" size="sm">
+                    Generate Report
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Charts Section */}
+          <div className="space-y-6">
+            {/* Chart Filters */}
+            <Card className="animate-fade-in delay-200">
+              <CardHeader className="flex flex-row items-center justify-between">
+                <CardTitle className="flex items-center gap-2">
+                  <Filter size={20} className="text-[hsl(174,62%,47%)]" />
+                  Chart Filters
+                </CardTitle>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowChartFilters(!showChartFilters)}
+                >
+                  {showChartFilters ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                </Button>
+              </CardHeader>
+
+              {showChartFilters && (
+                <CardContent className="pt-0">
+                  <div className="flex flex-wrap gap-4 items-end">
+                    <div>
+                      <label className="block text-sm text-gray-500 mb-1">Date Range</label>
+                      <Select
+                        value={chartDateRange}
+                        onChange={(e) => setChartDateRange(e.target.value as DateRange)}
+                        options={[
+                          { value: "1week", label: "Last 1 Week" },
+                          { value: "1month", label: "Last 1 Month" },
+                          { value: "3months", label: "Last 3 Months" },
+                          { value: "1year", label: "Last 1 Year" },
+                          { value: "all", label: "All Time" },
+                          { value: "custom", label: "Custom Range" },
+                        ]}
+                        className="w-40"
+                      />
+                    </div>
+
+                    {chartDateRange === "custom" && (
+                      <>
+                        <div>
+                          <label className="block text-sm text-gray-500 mb-1">Start Date</label>
+                          <Input
+                            type="date"
+                            value={customStartDate}
+                            onChange={(e) => setCustomStartDate(e.target.value)}
+                            className="w-40"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm text-gray-500 mb-1">End Date</label>
+                          <Input
+                            type="date"
+                            value={customEndDate}
+                            onChange={(e) => setCustomEndDate(e.target.value)}
+                            className="w-40"
+                          />
+                        </div>
+                      </>
+                    )}
+
+                    <div>
+                      <label className="block text-sm text-gray-500 mb-1">Severity</label>
+                      <Select
+                        value={chartSeverityFilter}
+                        onChange={(e) => setChartSeverityFilter(e.target.value as SeverityFilter)}
+                        options={[
+                          { value: "all", label: "All Severities" },
+                          { value: "high", label: "High Only" },
+                          { value: "medium", label: "Medium Only" },
+                          { value: "low", label: "Low Only" },
+                        ]}
+                        className="w-40"
+                      />
+                    </div>
+                  </div>
+                </CardContent>
+              )}
+            </Card>
+
+            {/* Charts Grid */}
+            <div className="grid lg:grid-cols-2 gap-6">
+              {/* Line Chart */}
+              <Card className="animate-fade-in delay-300">
+                <CardHeader>
+                  <CardTitle className="text-lg">Entries Over Time</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="h-80">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={filteredChartData.lineData}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                        <XAxis 
+                          dataKey="date" 
+                          tick={{ fontSize: 12 }} 
+                          stroke="#9ca3af"
+                        />
+                        <YAxis 
+                          tick={{ fontSize: 12 }} 
+                          stroke="#9ca3af"
+                          allowDecimals={false}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: "white",
+                            border: "1px solid #e5e7eb",
+                            borderRadius: "8px",
+                            boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)",
+                          }}
+                        />
+                        <Legend />
+                        {chartSeverityFilter === "all" ? (
+                          <>
+                            <Line
+                              type="monotone"
+                              dataKey="high"
+                              name="High"
+                              stroke="#ef4444"
+                              strokeWidth={2}
+                              dot={{ fill: "#ef4444", strokeWidth: 2 }}
+                            />
+                            <Line
+                              type="monotone"
+                              dataKey="medium"
+                              name="Medium"
+                              stroke="#eab308"
+                              strokeWidth={2}
+                              dot={{ fill: "#eab308", strokeWidth: 2 }}
+                            />
+                            <Line
+                              type="monotone"
+                              dataKey="low"
+                              name="Low"
+                              stroke="#22c55e"
+                              strokeWidth={2}
+                              dot={{ fill: "#22c55e", strokeWidth: 2 }}
+                            />
+                          </>
+                        ) : (
+                          <Line
+                            type="monotone"
+                            dataKey="total"
+                            name="Entries"
+                            stroke={getSeverityColor(chartSeverityFilter as "high" | "medium" | "low")}
+                            strokeWidth={2}
+                            dot={{ fill: getSeverityColor(chartSeverityFilter as "high" | "medium" | "low"), strokeWidth: 2 }}
+                          />
+                        )}
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Pie Chart */}
+              <Card className="animate-fade-in delay-400">
+                <CardHeader>
+                  <CardTitle className="text-lg">Symptoms Distribution</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="h-80">
+                    {filteredChartData.pieData.length === 0 ? (
+                      <div className="h-full flex items-center justify-center text-gray-500">
+                        No data for selected filters
+                      </div>
+                    ) : (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={filteredChartData.pieData}
+                            cx="50%"
+                            cy="50%"
+                            labelLine={false}
+                            outerRadius={100}
+                            fill="#8884d8"
+                            dataKey="value"
+                            label={({ name, percent }) =>
+                              `${name || 'Unknown'} ${((percent ?? 0) * 100).toFixed(0)}%`
+                            }
+                          >
+                            {filteredChartData.pieData.map((entry, index) => (
+                              <Cell
+                                key={`cell-${index}`}
+                                fill={PIE_COLORS[index % PIE_COLORS.length]}
+                              />
+                            ))}
+                          </Pie>
+                          <Tooltip
+                            contentStyle={{
+                              backgroundColor: "white",
+                              border: "1px solid #e5e7eb",
+                              borderRadius: "8px",
+                              boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)",
+                            }}
+                            formatter={(value: number, name: string) => [`${value} entries`, name]}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Severity Distribution */}
+            <Card className="animate-fade-in delay-500">
+              <CardHeader>
+                <CardTitle className="text-lg">Severity Distribution</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-3 gap-4">
+                  {stats.entriesBySeverity.map((item) => (
+                    <div
+                      key={item.severity}
+                      className={`p-6 rounded-xl text-center ${
+                        item.severity === "High"
+                          ? "bg-red-50 border border-red-200"
+                          : item.severity === "Medium"
+                          ? "bg-yellow-50 border border-yellow-200"
+                          : "bg-green-50 border border-green-200"
+                      }`}
+                    >
+                      <p
+                        className={`text-4xl font-bold ${
+                          item.severity === "High"
+                            ? "text-red-500"
+                            : item.severity === "Medium"
+                            ? "text-yellow-500"
+                            : "text-green-500"
+                        }`}
+                      >
+                        {item.count}
+                      </p>
+                      <p className="text-gray-600 mt-1">{item.severity} Severity</p>
+                      <p className="text-sm text-gray-400">
+                        {((item.count / stats.totalEntries) * 100).toFixed(1)}% of total
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </main>
+
+      {/* Edit Profile Modal */}
+      {showEditProfile && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <Card className="w-full max-w-2xl max-h-[90vh] overflow-y-auto animate-fade-in">
+            <CardHeader className="flex flex-row items-center justify-between border-b">
+              <CardTitle className="text-xl">Edit Profile</CardTitle>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={() => setShowEditProfile(false)}
+              >
+                <X size={20} />
+              </Button>
+            </CardHeader>
+            <CardContent className="p-6 space-y-6">
+              {/* Profile Picture Upload */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-3">Profile Picture</label>
+                <div className="flex items-center gap-4">
+                  <div className="w-24 h-24 rounded-full bg-gradient-to-br from-[hsl(174,62%,47%)] to-[hsl(174,62%,37%)] flex items-center justify-center text-white text-3xl font-bold shadow-lg overflow-hidden">
+                    {profileImage ? (
+                      <img src={profileImage} alt="Profile" className="w-full h-full object-cover" />
+                    ) : (
+                      user.name.charAt(0)
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <label className="cursor-pointer">
+                      <input 
+                        type="file" 
+                        accept="image/*" 
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            const reader = new FileReader();
+                            reader.onloadend = () => {
+                              setProfileImage(reader.result as string);
+                            };
+                            reader.readAsDataURL(file);
+                          }
+                        }}
+                      />
+                      <span className="inline-flex items-center gap-2 px-4 py-2 bg-[hsl(174,62%,47%)] text-white rounded-lg hover:bg-[hsl(174,62%,37%)] transition-colors">
+                        <Upload size={16} />
+                        Upload Photo
+                      </span>
+                    </label>
+                    {profileImage && (
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        onClick={() => setProfileImage(null)}
+                      >
+                        Remove Photo
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Family Health History */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-3">
+                  <Heart size={16} className="inline mr-2 text-pink-500" />
+                  Family Health History
+                </label>
+                <p className="text-sm text-gray-500 mb-3">Select all conditions that apply to your family medical history</p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {familyHistoryOptions.map((option) => (
+                    <label 
+                      key={option}
+                      className={`flex items-center gap-2 p-3 rounded-lg border cursor-pointer transition-all ${
+                        editFamilyHistory.includes(option)
+                          ? "bg-pink-50 border-pink-300 text-pink-700"
+                          : "bg-white border-gray-200 hover:border-gray-300"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={editFamilyHistory.includes(option)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            if (option === "None") {
+                              setEditFamilyHistory(["None"]);
+                            } else {
+                              setEditFamilyHistory(prev => [...prev.filter(h => h !== "None"), option]);
+                            }
+                          } else {
+                            setEditFamilyHistory(prev => prev.filter(h => h !== option));
+                          }
+                        }}
+                        className="w-4 h-4 text-pink-500 rounded"
+                      />
+                      <span className="text-sm">{option}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Save Button */}
+              <div className="flex justify-end gap-3 pt-4 border-t">
+                <Button variant="outline" onClick={() => setShowEditProfile(false)}>
+                  Cancel
+                </Button>
+                <Button onClick={() => {
+                  // Save profile changes
+                  setShowEditProfile(false);
+                  setShowChangesSaved(true);
+                  setTimeout(() => setShowChangesSaved(false), 5000);
+                }}>
+                  Save Changes
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Add Entry Modal */}
+      {showAddEntry && (
+        <div className="fixed inset-0 bg-black/50 flex items-start justify-center z-50 p-4 pt-20 overflow-y-auto">
+          <Card className="w-full max-w-xl animate-fade-in">
+            <CardHeader className="flex flex-row items-center justify-between border-b">
+              <CardTitle className="text-xl flex items-center gap-2">
+                <Plus size={20} className="text-green-500" />
+                Add New Entry
+              </CardTitle>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={() => setShowAddEntry(false)}
+              >
+                <X size={20} />
+              </Button>
+            </CardHeader>
+            <CardContent className="p-6 space-y-6">
+              {/* Symptom Selection */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Select or Enter Symptom
+                </label>
+                
+                {/* Search Input */}
+                <div className="relative mb-3">
+                  <Input
+                    type="text"
+                    placeholder="Search symptoms..."
+                    value={symptomSearch}
+                    onChange={(e) => setSymptomSearch(e.target.value)}
+                    className="pr-10"
+                  />
+                  <Activity size={18} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                </div>
+                
+                {/* Symptoms List */}
+                <div className="max-h-48 overflow-y-auto border rounded-lg p-2 space-y-1">
+                  {filteredSymptoms.map((symptom) => (
+                    <button
+                      key={symptom.name}
+                      type="button"
+                      onClick={() => {
+                        setSelectedSymptom(symptom.name);
+                        setCustomSymptom("");
+                        setEntrySeverity(symptom.recommendedSeverity);
+                      }}
+                      className={`w-full text-left px-3 py-2 rounded-lg flex items-center justify-between transition-all ${
+                        selectedSymptom === symptom.name
+                          ? "bg-[hsl(174,62%,47%)] text-white"
+                          : "hover:bg-gray-100"
+                      }`}
+                    >
+                      <span>{symptom.name}</span>
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${
+                        selectedSymptom === symptom.name 
+                          ? "bg-white/20 text-white"
+                          : symptom.recommendedSeverity === "high" 
+                            ? "bg-red-100 text-red-600"
+                            : symptom.recommendedSeverity === "medium"
+                              ? "bg-yellow-100 text-yellow-700"
+                              : "bg-green-100 text-green-600"
+                      }`}>
+                        {symptom.recommendedSeverity}
+                      </span>
+                    </button>
+                  ))}
+                  
+                  {filteredSymptoms.length === 0 && symptomSearch && (
+                    <p className="text-sm text-gray-500 text-center py-2">
+                      No symptoms found. Add it as custom below.
+                    </p>
+                  )}
+                </div>
+                
+                {/* Custom Symptom */}
+                <div className="mt-3">
+                  <label className="block text-xs text-gray-500 mb-1">Or enter custom symptom:</label>
+                  <Input
+                    type="text"
+                    placeholder="Enter custom symptom..."
+                    value={customSymptom}
+                    onChange={(e) => {
+                      setCustomSymptom(e.target.value);
+                      setSelectedSymptom("");
+                      if (e.target.value && !selectedSymptom) {
+                        setEntrySeverity("low"); // Default for custom
+                      }
+                    }}
+                  />
+                </div>
+              </div>
+              
+              {/* Severity Selection */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Severity Level
+                  {selectedSymptom && (
+                    <span className="ml-2 text-xs text-gray-500 font-normal">
+                      (Recommended: {commonSymptoms.find(s => s.name === selectedSymptom)?.recommendedSeverity})
+                    </span>
+                  )}
+                </label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEntrySeverity("low")}
+                    className={`flex-1 py-3 rounded-lg font-medium transition-all ${
+                      entrySeverity === "low"
+                        ? "bg-green-500 text-white shadow-lg scale-105"
+                        : "bg-green-100 text-green-700 hover:bg-green-200"
+                    }`}
+                  >
+                    Low
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEntrySeverity("medium")}
+                    className={`flex-1 py-3 rounded-lg font-medium transition-all ${
+                      entrySeverity === "medium"
+                        ? "bg-yellow-500 text-white shadow-lg scale-105"
+                        : "bg-yellow-100 text-yellow-700 hover:bg-yellow-200"
+                    }`}
+                  >
+                    Moderate
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEntrySeverity("high")}
+                    className={`flex-1 py-3 rounded-lg font-medium transition-all ${
+                      entrySeverity === "high"
+                        ? "bg-red-500 text-white shadow-lg scale-105"
+                        : "bg-red-100 text-red-700 hover:bg-red-200"
+                    }`}
+                  >
+                    High
+                  </button>
+                </div>
+              </div>
+              
+              {/* Optional Note */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Note <span className="text-gray-400 font-normal">(optional)</span>
+                </label>
+                <Input
+                  type="text"
+                  placeholder="Brief description (100 chars max)"
+                  value={entryNote}
+                  onChange={(e) => setEntryNote(e.target.value.slice(0, 100))}
+                  maxLength={100}
+                />
+                <p className="text-xs text-gray-400 mt-1 text-right">{entryNote.length}/100</p>
+              </div>
+              
+              {/* Submit Button */}
+              <div className="flex justify-end gap-3 pt-4 border-t">
+                <Button variant="outline" onClick={() => setShowAddEntry(false)}>
+                  Cancel
+                </Button>
+                <Button 
+                  className="bg-green-500 hover:bg-green-600"
+                  disabled={!selectedSymptom && !customSymptom}
+                  onClick={() => {
+                    // Add entry logic here
+                    setShowAddEntry(false);
+                    setEntryNote("");
+                    setShowEntryConfirmation(true);
+                    // Auto-hide after 5 seconds
+                    setTimeout(() => setShowEntryConfirmation(false), 5000);
+                  }}
+                >
+                  <Plus size={16} className="mr-2" />
+                  Add Entry
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Add Appointment Modal */}
+      {showAddAppointment && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <Card className="w-full max-w-lg max-h-[90vh] overflow-y-auto animate-fade-in">
+            <CardHeader className="flex flex-row items-center justify-between border-b">
+              <CardTitle className="text-xl flex items-center gap-2">
+                <Calendar size={20} className="text-blue-500" />
+                Add Appointment
+              </CardTitle>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={() => setShowAddAppointment(false)}
+              >
+                <X size={20} />
+              </Button>
+            </CardHeader>
+            <CardContent className="p-6 space-y-4">
+              {/* Title */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Appointment Title *
+                </label>
+                <Input
+                  type="text"
+                  value={newAppointment.title}
+                  onChange={(e) => setNewAppointment(prev => ({ ...prev, title: e.target.value }))}
+                  placeholder="e.g., Annual Physical, Follow-up"
+                />
+              </div>
+              
+              {/* Provider Name */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Provider Name
+                </label>
+                <Input
+                  type="text"
+                  value={newAppointment.providerName}
+                  onChange={(e) => setNewAppointment(prev => ({ ...prev, providerName: e.target.value }))}
+                  placeholder="e.g., Dr. John Smith"
+                />
+              </div>
+              
+              {/* Provider Phone */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Provider Phone <span className="text-gray-400 font-normal">(for Teli AI calls)</span>
+                </label>
+                <Input
+                  type="tel"
+                  value={newAppointment.providerPhone}
+                  onChange={(e) => setNewAppointment(prev => ({ ...prev, providerPhone: e.target.value }))}
+                  placeholder="(555) 123-4567"
+                />
+              </div>
+              
+              {/* Location */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Location
+                </label>
+                <Input
+                  type="text"
+                  value={newAppointment.location}
+                  onChange={(e) => setNewAppointment(prev => ({ ...prev, location: e.target.value }))}
+                  placeholder="Address or 'Virtual'"
+                />
+              </div>
+              
+              {/* Date & Time */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Date *
+                  </label>
+                  <Input
+                    type="date"
+                    value={newAppointment.date}
+                    onChange={(e) => setNewAppointment(prev => ({ ...prev, date: e.target.value }))}
+                    min={new Date().toISOString().split("T")[0]}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Time *
+                  </label>
+                  <Input
+                    type="time"
+                    value={newAppointment.time}
+                    onChange={(e) => setNewAppointment(prev => ({ ...prev, time: e.target.value }))}
+                  />
+                </div>
+              </div>
+              
+              {/* Reminder Toggle */}
+              <div className="p-4 bg-blue-50 rounded-xl">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Bell size={16} className="text-blue-600" />
+                    <span className="font-medium text-gray-800">Send Reminder</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setNewAppointment(prev => ({ ...prev, reminderEnabled: !prev.reminderEnabled }))}
+                    className={`relative w-12 h-6 rounded-full transition-colors ${
+                      newAppointment.reminderEnabled ? "bg-blue-500" : "bg-gray-300"
+                    }`}
+                  >
+                    <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${
+                      newAppointment.reminderEnabled ? "left-7" : "left-1"
+                    }`} />
+                  </button>
+                </div>
+                {newAppointment.reminderEnabled && (
+                  <p className="text-xs text-blue-600 mt-2">
+                    You&apos;ll receive a text reminder 24 hours before this appointment.
+                  </p>
+                )}
+              </div>
+              
+              {/* Submit Button */}
+              <div className="flex justify-end gap-3 pt-4 border-t">
+                <Button variant="outline" onClick={() => setShowAddAppointment(false)}>
+                  Cancel
+                </Button>
+                <Button 
+                  className="bg-blue-500 hover:bg-blue-600"
+                  disabled={!newAppointment.title || !newAppointment.date || !newAppointment.time}
+                  onClick={handleAddAppointment}
+                >
+                  <Plus size={16} className="mr-2" />
+                  Add Appointment
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Cancel Appointment Modal */}
+      {showCancelModal && selectedAppointment && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <Card className="w-full max-w-md animate-fade-in">
+            <CardHeader className="flex flex-row items-center justify-between border-b">
+              <CardTitle className="text-xl flex items-center gap-2">
+                <PhoneOff size={20} className="text-red-500" />
+                Cancel Appointment
+              </CardTitle>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={() => { setShowCancelModal(false); setSelectedAppointment(null); }}
+              >
+                <X size={20} />
+              </Button>
+            </CardHeader>
+            <CardContent className="p-6 space-y-4">
+              {/* Appointment Info */}
+              <div className="p-4 bg-gray-50 rounded-xl">
+                <p className="font-medium text-gray-800">{selectedAppointment.title}</p>
+                <p className="text-sm text-gray-600">{selectedAppointment.providerName}</p>
+                <p className="text-sm text-gray-500 mt-2">
+                  {formatAppointmentDate(selectedAppointment.date)} at {formatTime(selectedAppointment.time)}
+                </p>
+              </div>
+              
+              {/* Teli AI Info */}
+              <div className="p-4 bg-[hsl(174,62%,95%)] rounded-xl">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 bg-[hsl(174,62%,47%)] rounded-full flex items-center justify-center">
+                    <Phone size={20} className="text-white" />
+                  </div>
+                  <div>
+                    <p className="font-medium text-[hsl(174,62%,30%)]">Teli AI will call to cancel</p>
+                    <p className="text-sm text-[hsl(174,62%,40%)] mt-1">
+                      Our AI assistant will call {selectedAppointment.providerPhone} to cancel this appointment on your behalf.
+                    </p>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Preferred Call Time */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Preferred call time
+                </label>
+                <Select
+                  value={actionForm.preferredCallHour.toString()}
+                  onChange={(e) => setActionForm(prev => ({ ...prev, preferredCallHour: parseInt(e.target.value) }))}
+                  options={Array.from({ length: 12 }, (_, i) => i + 8).map(hour => ({
+                    value: hour.toString(),
+                    label: `${hour > 12 ? hour - 12 : hour}:00 ${hour >= 12 ? "PM" : "AM"}`,
+                  }))}
+                  className="w-full"
+                />
+                <p className="text-xs text-gray-500 mt-1">Teli AI will attempt to call during business hours</p>
+              </div>
+              
+              {/* Buttons */}
+              <div className="flex justify-end gap-3 pt-4 border-t">
+                <Button variant="outline" onClick={() => { setShowCancelModal(false); setSelectedAppointment(null); }}>
+                  Keep Appointment
+                </Button>
+                <Button 
+                  className="bg-red-500 hover:bg-red-600 text-white"
+                  onClick={submitCancellation}
+                >
+                  Request Cancellation
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Reschedule Appointment Modal */}
+      {showRescheduleModal && selectedAppointment && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <Card className="w-full max-w-md animate-fade-in">
+            <CardHeader className="flex flex-row items-center justify-between border-b">
+              <CardTitle className="text-xl flex items-center gap-2">
+                <RefreshCw size={20} className="text-purple-500" />
+                Reschedule Appointment
+              </CardTitle>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={() => { setShowRescheduleModal(false); setSelectedAppointment(null); }}
+              >
+                <X size={20} />
+              </Button>
+            </CardHeader>
+            <CardContent className="p-6 space-y-4">
+              {/* Current Appointment */}
+              <div className="p-4 bg-gray-50 rounded-xl">
+                <p className="text-xs text-gray-500 uppercase mb-1">Current Appointment</p>
+                <p className="font-medium text-gray-800">{selectedAppointment.title}</p>
+                <p className="text-sm text-gray-600">{selectedAppointment.providerName}</p>
+                <p className="text-sm text-gray-500 mt-1">
+                  {formatAppointmentDate(selectedAppointment.date)} at {formatTime(selectedAppointment.time)}
+                </p>
+              </div>
+              
+              {/* New Date/Time */}
+              <div className="p-4 bg-purple-50 rounded-xl">
+                <p className="text-xs text-purple-600 uppercase mb-3 font-medium">Preferred New Time</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm text-gray-600 mb-1">Date</label>
+                    <Input
+                      type="date"
+                      value={actionForm.newDate}
+                      onChange={(e) => setActionForm(prev => ({ ...prev, newDate: e.target.value }))}
+                      min={new Date().toISOString().split("T")[0]}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-gray-600 mb-1">Time</label>
+                    <Input
+                      type="time"
+                      value={actionForm.newTime}
+                      onChange={(e) => setActionForm(prev => ({ ...prev, newTime: e.target.value }))}
+                    />
+                  </div>
+                </div>
+              </div>
+              
+              {/* Teli AI Info */}
+              <div className="p-4 bg-[hsl(174,62%,95%)] rounded-xl">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 bg-[hsl(174,62%,47%)] rounded-full flex items-center justify-center">
+                    <Phone size={20} className="text-white" />
+                  </div>
+                  <div>
+                    <p className="font-medium text-[hsl(174,62%,30%)]">Teli AI will call to reschedule</p>
+                    <p className="text-sm text-[hsl(174,62%,40%)] mt-1">
+                      Our AI will request your preferred time, but the final time depends on availability.
+                    </p>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Preferred Call Time */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Preferred call time
+                </label>
+                <Select
+                  value={actionForm.preferredCallHour.toString()}
+                  onChange={(e) => setActionForm(prev => ({ ...prev, preferredCallHour: parseInt(e.target.value) }))}
+                  options={Array.from({ length: 12 }, (_, i) => i + 8).map(hour => ({
+                    value: hour.toString(),
+                    label: `${hour > 12 ? hour - 12 : hour}:00 ${hour >= 12 ? "PM" : "AM"}`,
+                  }))}
+                  className="w-full"
+                />
+              </div>
+              
+              {/* Buttons */}
+              <div className="flex justify-end gap-3 pt-4 border-t">
+                <Button variant="outline" onClick={() => { setShowRescheduleModal(false); setSelectedAppointment(null); }}>
+                  Cancel
+                </Button>
+                <Button 
+                  className="bg-purple-500 hover:bg-purple-600 text-white"
+                  disabled={!actionForm.newDate || !actionForm.newTime}
+                  onClick={submitReschedule}
+                >
+                  Request Reschedule
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Entry Confirmation Toast */}
+      {showEntryConfirmation && (
+        <div className="fixed bottom-4 right-4 z-50 animate-slide-in-from-right">
+          <Card className="bg-green-50 border-green-200 shadow-lg">
+            <CardContent className="p-4 flex items-center gap-3">
+              <div className="w-10 h-10 bg-green-500 rounded-full flex items-center justify-center">
+                <CheckCircle size={24} className="text-white" />
+              </div>
+              <div>
+                <p className="font-semibold text-green-800">Entry Added!</p>
+                <p className="text-sm text-green-600">Your health entry has been recorded.</p>
+              </div>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="ml-2 text-green-600 hover:text-green-800"
+                onClick={() => setShowEntryConfirmation(false)}
+              >
+                <X size={16} />
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Changes Saved Toast */}
+      {showChangesSaved && (
+        <div className="fixed bottom-4 right-4 z-50 animate-slide-in-from-right">
+          <Card className="bg-blue-50 border-blue-200 shadow-lg">
+            <CardContent className="p-4 flex items-center gap-3">
+              <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center">
+                <CheckCircle size={24} className="text-white" />
+              </div>
+              <div>
+                <p className="font-semibold text-blue-800">Changes Saved!</p>
+                <p className="text-sm text-blue-600">Your profile has been updated.</p>
+              </div>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="ml-2 text-blue-600 hover:text-blue-800"
+                onClick={() => setShowChangesSaved(false)}
+              >
+                <X size={16} />
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Report Generated Toast */}
+      {showReportGenerated && (
+        <div className="fixed bottom-4 right-4 z-50 animate-slide-in-from-right">
+          <Card className="bg-purple-50 border-purple-200 shadow-lg">
+            <CardContent className="p-4 flex items-center gap-3">
+              <div className="w-10 h-10 bg-purple-500 rounded-full flex items-center justify-center">
+                <CheckCircle size={24} className="text-white" />
+              </div>
+              <div>
+                <p className="font-semibold text-purple-800">Report Generated!</p>
+                <p className="text-sm text-purple-600">Your health report is ready to download.</p>
+              </div>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="ml-2 text-purple-600 hover:text-purple-800"
+                onClick={() => setShowReportGenerated(false)}
+              >
+                <X size={16} />
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Logged Out Toast */}
+      {showLoggedOut && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 animate-slide-in-from-top">
+          <Card className="bg-gray-50 border-gray-200 shadow-lg">
+            <CardContent className="p-4 flex items-center gap-3">
+              <div className="w-10 h-10 bg-gray-500 rounded-full flex items-center justify-center">
+                <LogOut size={24} className="text-white" />
+              </div>
+              <div>
+                <p className="font-semibold text-gray-800">Logged Out Successfully</p>
+                <p className="text-sm text-gray-600">Redirecting to home page...</p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Appointment Added Toast */}
+      {showAppointmentAdded && (
+        <div className="fixed bottom-4 right-4 z-50 animate-slide-in-from-right">
+          <Card className="bg-blue-50 border-blue-200 shadow-lg">
+            <CardContent className="p-4 flex items-center gap-3">
+              <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center">
+                <Calendar size={24} className="text-white" />
+              </div>
+              <div>
+                <p className="font-semibold text-blue-800">Appointment Added!</p>
+                <p className="text-sm text-blue-600">Your appointment has been scheduled.</p>
+              </div>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="ml-2 text-blue-600 hover:text-blue-800"
+                onClick={() => setShowAppointmentAdded(false)}
+              >
+                <X size={16} />
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      <Footer />
+    </div>
+  );
+}
