@@ -25,7 +25,7 @@ export function Header() {
         <nav className="hidden md:flex items-center gap-6">
           {/* Solutions Dropdown */}
           <div 
-            className="relative py-4 -my-4"
+            className="relative py-6 -my-6"
             onMouseEnter={() => setSolutionsOpen(true)}
             onMouseLeave={() => setSolutionsOpen(false)}
             role="navigation"
@@ -36,7 +36,7 @@ export function Header() {
             </button>
             
             {solutionsOpen && (
-              <div className="absolute top-full left-0 mt-6 w-56 bg-background border rounded-lg shadow-lg overflow-hidden z-50">
+              <div className="absolute top-full left-0 mt-0 w-56 bg-background border rounded-lg shadow-lg overflow-hidden z-50">
                 <Link 
                   href="/crm"
                   className="block px-4 py-3 hover:bg-muted transition-colors"
