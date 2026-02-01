@@ -31,9 +31,12 @@ class Settings(BaseSettings):
     
     # AI Services
     GEMINI_API_KEY: str = ""
+    TELI_AI_API_KEY: str = ""
+    TELI_AI_WEBHOOK_URL: str = "http://localhost:8000/api"
     
     class Config:
         env_file = ".env"
         case_sensitive = True
+        extra = "ignore"  # Ignore extra fields in .env
 
 settings = Settings()

@@ -45,6 +45,8 @@ export interface SignUpData {
   accountNumber: string;
   name: string;
   dateOfBirth: string;
+  password: string;
+  email?: string;
 }
 
 export interface User {
@@ -111,7 +113,7 @@ export const authAPI = {
 // Dashboard API
 export const dashboardAPI = {
   getDashboardData: async (): Promise<DashboardData> => {
-    const response = await api.get('/api/dashboard');
+    const response = await api.get('/api/dashboard/');
     return response.data;
   },
 
@@ -122,79 +124,104 @@ export const dashboardAPI = {
     endDate?: string;
     sortBy?: 'newest' | 'oldest';
   }) => {
-    const response = await api.get('/api/entries', { params: filters });
+    const response = await api.get('/api/dashboard/entries', { params: filters });
     return response.data;
   },
 
   addEntry: async (entry: Omit<DiaryEntry, 'id'>) => {
-    const response = await api.post('/api/entries', entry);
+    const response = await api.post('/api/dashboard/entries', entry);
+    return response.data;
+  },
+
+  updateProfile: async (data: { familyHistory?: string[]; profileImage?: string }) => {
+    const response = await api.patch('/api/dashboard/profile', data);
     return response.data;
   },
 };
 
-// Mock data for demo purposes
-export const getMockDashboardData = (): DashboardData => {
-  const today = new Date();
-  const entries: DiaryEntry[] = [
-    { id: '1', date: new Date(today.getTime() - 0 * 24 * 60 * 60 * 1000).toISOString(), symptoms: 'Headache, fatigue', severity: 'medium', category: 'General' },
-    { id: '2', date: new Date(today.getTime() - 1 * 24 * 60 * 60 * 1000).toISOString(), symptoms: 'Mild cough', severity: 'low', category: 'Respiratory' },
-    { id: '3', date: new Date(today.getTime() - 2 * 24 * 60 * 60 * 1000).toISOString(), symptoms: 'Severe back pain', severity: 'high', category: 'Musculoskeletal' },
-    { id: '4', date: new Date(today.getTime() - 3 * 24 * 60 * 60 * 1000).toISOString(), symptoms: 'Stomach discomfort', severity: 'medium', category: 'Digestive' },
-    { id: '5', date: new Date(today.getTime() - 5 * 24 * 60 * 60 * 1000).toISOString(), symptoms: 'Dizziness', severity: 'low', category: 'Neurological' },
-    { id: '6', date: new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString(), symptoms: 'Chest tightness', severity: 'high', category: 'Cardiovascular' },
-    { id: '7', date: new Date(today.getTime() - 10 * 24 * 60 * 60 * 1000).toISOString(), symptoms: 'Skin rash', severity: 'medium', category: 'Dermatological' },
-    { id: '8', date: new Date(today.getTime() - 14 * 24 * 60 * 60 * 1000).toISOString(), symptoms: 'Joint stiffness', severity: 'low', category: 'Musculoskeletal' },
-    { id: '9', date: new Date(today.getTime() - 21 * 24 * 60 * 60 * 1000).toISOString(), symptoms: 'Severe migraine', severity: 'high', category: 'Neurological' },
-    { id: '10', date: new Date(today.getTime() - 28 * 24 * 60 * 60 * 1000).toISOString(), symptoms: 'Nausea', severity: 'medium', category: 'Digestive' },
-    { id: '11', date: new Date(today.getTime() - 35 * 24 * 60 * 60 * 1000).toISOString(), symptoms: 'Shortness of breath', severity: 'high', category: 'Respiratory' },
-    { id: '12', date: new Date(today.getTime() - 45 * 24 * 60 * 60 * 1000).toISOString(), symptoms: 'Fatigue', severity: 'low', category: 'General' },
-  ];
+// Appointments API
+export interface Appointment {
+  id: string;
+  title: string;
+  providerName: string;
+  providerPhone: string;
+  providerSpecialty?: string;
+  location: string;
+  date: string;
+  time: string;
+  status: string;
+  previousStatus?: string;
+  reminderEnabled: boolean;
+  canUndo?: boolean;
+  notes?: string;
+}
 
-  // Generate time series data
-  const entriesOverTime: { date: string; count: number; highCount: number; mediumCount: number; lowCount: number }[] = [];
-  for (let i = 30; i >= 0; i--) {
-    const date = new Date(today.getTime() - i * 24 * 60 * 60 * 1000);
-    const dateStr = date.toISOString().split('T')[0];
-    const dayEntries = entries.filter(e => e.date.split('T')[0] === dateStr);
-    entriesOverTime.push({
-      date: dateStr,
-      count: dayEntries.length,
-      highCount: dayEntries.filter(e => e.severity === 'high').length,
-      mediumCount: dayEntries.filter(e => e.severity === 'medium').length,
-      lowCount: dayEntries.filter(e => e.severity === 'low').length,
-    });
-  }
+export const appointmentsAPI = {
+  getAppointments: async (status?: string): Promise<{ success: boolean; data: Appointment[] }> => {
+    const response = await api.get('/api/appointments', { params: status ? { status } : {} });
+    return response.data;
+  },
 
-  // Category breakdown
-  const categories = ['General', 'Respiratory', 'Musculoskeletal', 'Digestive', 'Neurological', 'Cardiovascular', 'Dermatological'];
-  const entriesByCategory = categories.map(category => ({
-    category,
-    count: entries.filter(e => e.category === category).length,
-  })).filter(c => c.count > 0);
+  getAppointment: async (id: string): Promise<{ success: boolean; data: Appointment }> => {
+    const response = await api.get(`/api/appointments/${id}`);
+    return response.data;
+  },
 
-  // Severity breakdown
-  const entriesBySeverity = [
-    { severity: 'High', count: entries.filter(e => e.severity === 'high').length },
-    { severity: 'Medium', count: entries.filter(e => e.severity === 'medium').length },
-    { severity: 'Low', count: entries.filter(e => e.severity === 'low').length },
-  ];
+  createAppointment: async (data: {
+    providerId: string;
+    title: string;
+    appointmentDate: string;
+    appointmentTime: string;
+    location?: string;
+    reminderEnabled?: boolean;
+    notes?: string;
+  }): Promise<{ success: boolean; data: Appointment }> => {
+    const response = await api.post('/api/appointments', data);
+    return response.data;
+  },
 
-  return {
-    user: {
-      id: 'user_001',
-      name: 'Sarah Johnson',
-      dateOfBirth: '1985-06-15',
-      phoneNumber: '(555) 123-4567',
-      accountNumber: 'AVL123456789',
-    },
-    recentEntries: entries,
-    stats: {
-      totalEntries: entries.length,
-      entriesByCategory,
-      entriesBySeverity,
-      entriesOverTime,
-    },
-  };
+  cancelAppointment: async (id: string, reason?: string, preferredCallHour?: number): Promise<{ success: boolean }> => {
+    const response = await api.post(`/api/appointments/${id}/cancel`, { reason, preferredCallHour });
+    return response.data;
+  },
+
+  rescheduleAppointment: async (id: string, newDate: string, newTime: string, reason?: string, preferredCallHour?: number): Promise<{ success: boolean }> => {
+    const response = await api.post(`/api/appointments/${id}/reschedule`, { newDate, newTime, reason, preferredCallHour });
+    return response.data;
+  },
+
+  undoAction: async (id: string): Promise<{ success: boolean }> => {
+    const response = await api.post(`/api/appointments/${id}/undo`);
+    return response.data;
+  },
+
+  toggleReminder: async (id: string, enabled: boolean): Promise<{ success: boolean }> => {
+    const response = await api.patch(`/api/appointments/${id}/reminder`, { enabled });
+    return response.data;
+  },
+};
+
+// Providers API
+export interface Provider {
+  id: string;
+  name: string;
+  specialty: string;
+  phoneNumber: string;
+  location: string;
+  address: string;
+  acceptsTeliCalls: boolean;
+}
+
+export const providersAPI = {
+  getProviders: async (specialty?: string): Promise<{ success: boolean; data: Provider[] }> => {
+    const response = await api.get('/api/providers', { params: specialty ? { specialty } : {} });
+    return response.data;
+  },
+
+  getProvider: async (id: string): Promise<{ success: boolean; data: Provider }> => {
+    const response = await api.get(`/api/providers/${id}`);
+    return response.data;
+  },
 };
 
 export default api;

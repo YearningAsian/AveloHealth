@@ -7,7 +7,6 @@ from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime, timedelta
-import random
 
 from app.core.auth import get_current_user
 
@@ -39,55 +38,56 @@ class DashboardResponse(BaseModel):
     recentEntries: List[DiaryEntry]
     stats: DashboardStats
 
-# Mock data generation for demo
-def generate_mock_entries() -> List[dict]:
-    """Generate realistic mock diary entries"""
-    
-    symptoms_by_category = {
-        "General": ["Headache, fatigue", "Fatigue and weakness", "General malaise", "Low energy"],
-        "Respiratory": ["Mild cough", "Shortness of breath", "Nasal congestion", "Sore throat"],
-        "Musculoskeletal": ["Back pain", "Joint stiffness", "Muscle aches", "Neck pain"],
-        "Digestive": ["Stomach discomfort", "Nausea", "Acid reflux", "Bloating"],
-        "Neurological": ["Dizziness", "Migraine", "Tension headache", "Light sensitivity"],
-        "Cardiovascular": ["Chest tightness", "Palpitations", "Elevated heart rate"],
-        "Dermatological": ["Skin rash", "Itching", "Dry skin patches"],
-    }
-    
-    entries = []
-    today = datetime.utcnow()
-    
-    # Generate entries over the past 90 days
-    for i in range(45):
-        days_ago = random.randint(0, 90)
-        entry_date = today - timedelta(days=days_ago)
-        
-        category = random.choice(list(symptoms_by_category.keys()))
-        symptoms = random.choice(symptoms_by_category[category])
-        severity = random.choices(
-            ["high", "medium", "low"],
-            weights=[0.2, 0.4, 0.4],  # More medium/low than high
-            k=1
-        )[0]
-        
-        entries.append({
-            "id": f"entry_{i+1}",
-            "date": entry_date.isoformat(),
-            "symptoms": symptoms,
-            "severity": severity,
-            "category": category,
-            "notes": None
-        })
-    
-    # Sort by date descending
-    entries.sort(key=lambda x: x["date"], reverse=True)
-    return entries
-
 @router.get("/", response_model=DashboardResponse)
-async def get_dashboard(current_user: dict = Depends(get_current_user)):
+async def get_dashboard(request: Request, current_user: dict = Depends(get_current_user)):
     """Get dashboard data for authenticated user"""
     
-    # Generate mock entries
-    entries = generate_mock_entries()
+    db = request.app.state.snowflake
+    user_id = current_user.get("sub")
+    
+    # Get user profile from database
+    user_result = await db.execute(
+        "SELECT * FROM users WHERE user_id = %(user_id)s",
+        {"user_id": user_id}
+    )
+    
+    if user_result:
+        user = user_result[0]
+        user_profile = {
+            "id": user.get('USER_ID'),
+            "name": user.get('NAME', current_user.get("name", "Unknown")),
+            "dateOfBirth": str(user.get('DATE_OF_BIRTH', '')),
+            "phoneNumber": user.get('PHONE_NUMBER', ''),
+            "accountNumber": user.get('ACCOUNT_NUMBER', '')
+        }
+    else:
+        user_profile = {
+            "id": user_id,
+            "name": current_user.get("name", "Unknown"),
+            "dateOfBirth": "",
+            "phoneNumber": "",
+            "accountNumber": ""
+        }
+    
+    # Get diary entries from database
+    entries_result = await db.execute("""
+        SELECT entry_id, entry_date, symptoms, severity, category, notes
+        FROM diary_entries 
+        WHERE user_id = %(user_id)s
+        ORDER BY entry_date DESC
+        LIMIT 100
+    """, {"user_id": user_id})
+    
+    entries = []
+    for e in entries_result:
+        entries.append({
+            "id": e.get('ENTRY_ID'),
+            "date": str(e.get('ENTRY_DATE', '')),
+            "symptoms": e.get('SYMPTOMS', ''),
+            "severity": e.get('SEVERITY', 'low'),
+            "category": e.get('CATEGORY', 'General'),
+            "notes": e.get('NOTES')
+        })
     
     # Calculate statistics
     total_entries = len(entries)
@@ -130,15 +130,6 @@ async def get_dashboard(current_user: dict = Depends(get_current_user)):
             "lowCount": len([e for e in day_entries if e["severity"] == "low"]),
         })
     
-    # User profile (from token or database)
-    user_profile = {
-        "id": current_user.get("sub", "user_001"),
-        "name": current_user.get("name", "Sarah Johnson"),
-        "dateOfBirth": "1985-06-15",
-        "phoneNumber": "(555) 123-4567",
-        "accountNumber": "AVL123456789"
-    }
-    
     return {
         "user": user_profile,
         "recentEntries": entries,
@@ -152,6 +143,7 @@ async def get_dashboard(current_user: dict = Depends(get_current_user)):
 
 @router.get("/entries")
 async def get_entries(
+    request: Request,
     severity: Optional[str] = None,
     category: Optional[str] = None,
     startDate: Optional[str] = None,
@@ -161,26 +153,49 @@ async def get_entries(
 ):
     """Get filtered diary entries"""
     
-    entries = generate_mock_entries()
+    db = request.app.state.snowflake
+    user_id = current_user.get("sub")
     
-    # Apply filters
+    # Build query with filters
+    query = "SELECT * FROM diary_entries WHERE user_id = %(user_id)s"
+    params = {"user_id": user_id}
+    
     if severity and severity != "all":
-        entries = [e for e in entries if e["severity"] == severity]
+        query += " AND severity = %(severity)s"
+        params["severity"] = severity
     
     if category and category != "all":
-        entries = [e for e in entries if e["category"] == category]
+        query += " AND category = %(category)s"
+        params["category"] = category
     
     if startDate:
-        entries = [e for e in entries if e["date"] >= startDate]
+        query += " AND entry_date >= %(start_date)s"
+        params["start_date"] = startDate
     
     if endDate:
-        entries = [e for e in entries if e["date"] <= endDate]
+        query += " AND entry_date <= %(end_date)s"
+        params["end_date"] = endDate
     
     # Sort
-    entries.sort(
-        key=lambda x: x["date"],
-        reverse=(sortBy == "newest")
-    )
+    if sortBy == "newest":
+        query += " ORDER BY entry_date DESC"
+    else:
+        query += " ORDER BY entry_date ASC"
+    
+    query += " LIMIT 100"
+    
+    entries_result = await db.execute(query, params)
+    
+    entries = []
+    for e in entries_result:
+        entries.append({
+            "id": e.get('ENTRY_ID'),
+            "date": str(e.get('ENTRY_DATE', '')),
+            "symptoms": e.get('SYMPTOMS', ''),
+            "severity": e.get('SEVERITY', 'low'),
+            "category": e.get('CATEGORY', 'General'),
+            "notes": e.get('NOTES')
+        })
     
     return {
         "success": True,
@@ -198,17 +213,37 @@ class CreateEntryRequest(BaseModel):
 @router.post("/entries")
 async def create_entry(
     entry: CreateEntryRequest,
+    request: Request,
     current_user: dict = Depends(get_current_user)
 ):
     """Create a new diary entry"""
+    
+    db = request.app.state.snowflake
+    user_id = current_user.get("sub")
     
     # Validate severity
     if entry.severity not in ["high", "medium", "low"]:
         raise HTTPException(status_code=400, detail="Invalid severity. Must be high, medium, or low")
     
-    # In production, save to database
+    # Save to database
+    import uuid
+    entry_id = str(uuid.uuid4())
+    
+    await db.execute("""
+        INSERT INTO diary_entries (entry_id, user_id, entry_date, symptoms, severity, category, notes)
+        VALUES (%(entry_id)s, %(user_id)s, %(entry_date)s, %(symptoms)s, %(severity)s, %(category)s, %(notes)s)
+    """, {
+        "entry_id": entry_id,
+        "user_id": user_id,
+        "entry_date": entry.date,
+        "symptoms": entry.symptoms,
+        "severity": entry.severity,
+        "category": entry.category,
+        "notes": entry.notes
+    })
+    
     new_entry = {
-        "id": f"entry_{datetime.utcnow().timestamp()}",
+        "id": entry_id,
         "date": entry.date,
         "symptoms": entry.symptoms,
         "severity": entry.severity,
@@ -221,4 +256,37 @@ async def create_entry(
         "success": True,
         "data": new_entry,
         "message": "Entry created successfully"
+    }
+
+class UpdateProfileRequest(BaseModel):
+    familyHistory: Optional[List[str]] = None
+    profileImage: Optional[str] = None
+
+@router.patch("/profile")
+async def update_profile(
+    profile: UpdateProfileRequest,
+    request: Request,
+    current_user: dict = Depends(get_current_user)
+):
+    """Update user profile (family history, profile image)"""
+    
+    db = request.app.state.snowflake
+    user_id = current_user.get("sub")
+    
+    # For now, store in local user state (could add to users table as JSON columns later)
+    # In production, you'd want to add columns like family_history JSON and profile_image_url to the users table
+    
+    update_fields = []
+    params = {"user_id": user_id}
+    
+    # This is a simplified version - in production you'd update actual DB columns
+    # For now we just return success since the frontend stores it in state
+    
+    return {
+        "success": True,
+        "message": "Profile updated successfully",
+        "data": {
+            "familyHistory": profile.familyHistory,
+            "profileImage": profile.profileImage
+        }
     }

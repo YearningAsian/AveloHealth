@@ -8,6 +8,7 @@ import { Footer } from "@/components/Footer";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { authAPI } from "@/lib/api";
 import {
   Phone,
   Mail,
@@ -37,6 +38,8 @@ export default function SignUpPage() {
   const [phoneNumber, setPhoneNumber] = useState("");
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [verificationCode, setVerificationCode] = useState("");
   const [name, setName] = useState("");
   const [dateOfBirth, setDateOfBirth] = useState("");
@@ -112,15 +115,27 @@ export default function SignUpPage() {
       return;
     }
 
+    if (!password || password.length < 6) {
+      setError("Password must be at least 6 characters");
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setError("Passwords do not match");
+      return;
+    }
+
     setIsLoading(true);
     
     try {
-      // Simulate sending verification code
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      // Send verification code via backend API
+      const contact = contactMethod === "phone" ? phoneNumber.replace(/\D/g, "") : email;
+      await authAPI.sendVerificationCode(contact);
       setCodeSent(true);
       setCurrentStep("verification");
-    } catch {
-      setError("Failed to send verification code. Please try again.");
+    } catch (err: unknown) {
+      const axiosError = err as { response?: { data?: { detail?: string } } };
+      setError(axiosError.response?.data?.detail || "Failed to send verification code. Please try again.");
     } finally {
       setIsLoading(false);
     }
@@ -139,19 +154,16 @@ export default function SignUpPage() {
     setIsLoading(true);
     
     try {
-      // Simulate verification
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      // Verify code via backend API
+      const contact = contactMethod === "phone" ? phoneNumber.replace(/\D/g, "") : email;
+      await authAPI.verifyPhone(contact, verificationCode);
       
-      // Demo: Accept any 6-digit code
-      if (verificationCode.length === 6) {
-        setShowVerificationSuccessToast(true);
-        setTimeout(() => setShowVerificationSuccessToast(false), 5000);
-        setCurrentStep("profile");
-      } else {
-        setError("Invalid verification code");
-      }
-    } catch {
-      setError("Verification failed. Please try again.");
+      setShowVerificationSuccessToast(true);
+      setTimeout(() => setShowVerificationSuccessToast(false), 5000);
+      setCurrentStep("profile");
+    } catch (err: unknown) {
+      const axiosError = err as { response?: { data?: { detail?: string } } };
+      setError(axiosError.response?.data?.detail || "Invalid verification code. Please try again.");
     } finally {
       setIsLoading(false);
     }
@@ -160,11 +172,13 @@ export default function SignUpPage() {
   const handleResendCode = async () => {
     setIsLoading(true);
     try {
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      const contact = contactMethod === "phone" ? phoneNumber.replace(/\D/g, "") : email;
+      await authAPI.sendVerificationCode(contact);
       setError("");
       setCodeSent(true);
-    } catch {
-      setError("Failed to resend code");
+    } catch (err: unknown) {
+      const axiosError = err as { response?: { data?: { detail?: string } } };
+      setError(axiosError.response?.data?.detail || "Failed to resend code");
     } finally {
       setIsLoading(false);
     }
@@ -188,29 +202,29 @@ export default function SignUpPage() {
     setIsLoading(true);
     
     try {
-      // Simulate account creation
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      // Store user data (demo)
-      const userData = {
-        id: `user_${Date.now()}`,
+      // Create account via backend API
+      const response = await authAPI.signUp({
+        phoneNumber: contactMethod === "phone" ? phoneNumber.replace(/\D/g, "") : "",
+        accountNumber: username, // Using username as account number
         name,
         dateOfBirth,
-        phoneNumber: contactMethod === "phone" ? phoneNumber.replace(/\D/g, "") : "",
-        email: contactMethod === "email" ? email : "",
-        username,
-        familyHistory,
-      };
+        password,
+        email: contactMethod === "email" ? email : undefined,
+      });
       
-      localStorage.setItem("auth_token", "demo_token_" + Date.now());
-      localStorage.setItem("user", JSON.stringify(userData));
-      
-      setCurrentStep("complete");
-      setShowAccountCreatedToast(true);
-      // Auto-hide after 5 seconds
-      setTimeout(() => setShowAccountCreatedToast(false), 5000);
-    } catch {
-      setError("Failed to create account. Please try again.");
+      if (response.success && response.token) {
+        localStorage.setItem("auth_token", response.token);
+        localStorage.setItem("user", JSON.stringify(response.user));
+        
+        setCurrentStep("complete");
+        setShowAccountCreatedToast(true);
+        setTimeout(() => setShowAccountCreatedToast(false), 5000);
+      } else {
+        setError("Failed to create account. Please try again.");
+      }
+    } catch (err: unknown) {
+      const axiosError = err as { response?: { data?: { detail?: string } } };
+      setError(axiosError.response?.data?.detail || "Failed to create account. Please try again.");
     } finally {
       setIsLoading(false);
     }
@@ -352,6 +366,38 @@ export default function SignUpPage() {
           <p className="text-xs text-gray-500 mt-1">
             Letters, numbers, underscore only ({username.length}/15)
           </p>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            <Shield size={16} className="inline mr-2" />
+            Password
+          </label>
+          <Input
+            type="password"
+            placeholder="At least 6 characters"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            minLength={6}
+            required
+            className="text-lg"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            <Shield size={16} className="inline mr-2" />
+            Confirm Password
+          </label>
+          <Input
+            type="password"
+            placeholder="Re-enter your password"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            minLength={6}
+            required
+            className="text-lg"
+          />
         </div>
       </div>
 

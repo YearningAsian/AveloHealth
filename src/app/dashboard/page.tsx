@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
-import { getMockDashboardData, type DashboardData } from "@/lib/api";
+import { dashboardAPI, appointmentsAPI, providersAPI, type DashboardData, type Appointment, type Provider } from "@/lib/api";
 import { calculateAge, formatDate, getSeverityColor, getSeverityBgClass } from "@/lib/utils";
 import {
   LogOut,
@@ -54,21 +54,7 @@ import {
 type SeverityFilter = "all" | "high" | "medium" | "low";
 type DateSort = "newest" | "oldest";
 type DateRange = "1week" | "1month" | "3months" | "1year" | "custom" | "all";
-type AppointmentStatus = "upcoming" | "done" | "cancelled" | "cancellation_in_progress" | "cancellation_failed" | "rescheduling_in_progress" | "rescheduling_failed" | "rescheduled";
-
-interface Appointment {
-  id: string;
-  title: string;
-  providerName: string;
-  providerPhone: string;
-  location: string;
-  date: string;
-  time: string;
-  status: AppointmentStatus;
-  previousStatus?: AppointmentStatus;
-  reminderEnabled: boolean;
-  canUndo?: boolean;
-}
+type AppointmentStatus = "upcoming" | "done" | "cancelled" | "cancellation_in_progress" | "cancellation_failed" | "rescheduling_in_progress" | "rescheduling_failed" | "rescheduled" | "completed";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -114,56 +100,26 @@ export default function DashboardPage() {
   const entriesPerPage = 5;
   
   // Appointments state
-  const [appointments, setAppointments] = useState<Appointment[]>([
-    {
-      id: "1",
-      title: "Annual Physical",
-      providerName: "Dr. Sarah Johnson",
-      providerPhone: "(555) 123-4567",
-      location: "123 Medical Center Dr, Suite 200",
-      date: "2026-02-05",
-      time: "10:00",
-      status: "upcoming",
-      reminderEnabled: true,
-    },
-    {
-      id: "2",
-      title: "Cardiology Follow-up",
-      providerName: "Dr. Michael Chen",
-      providerPhone: "(555) 987-6543",
-      location: "456 Heart Health Blvd",
-      date: "2026-02-15",
-      time: "14:30",
-      status: "upcoming",
-      reminderEnabled: true,
-    },
-    {
-      id: "3",
-      title: "Dermatology Checkup",
-      providerName: "Dr. Emily White",
-      providerPhone: "(555) 456-7890",
-      location: "Virtual",
-      date: "2026-01-20",
-      time: "09:00",
-      status: "done",
-      reminderEnabled: false,
-    },
-  ]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [appointmentsLoading, setAppointmentsLoading] = useState(true);
   const [showAddAppointment, setShowAddAppointment] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [showRescheduleModal, setShowRescheduleModal] = useState(false);
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
   const [appointmentStatusFilter, setAppointmentStatusFilter] = useState<"all" | AppointmentStatus>("all");
   
+  // Providers state
+  const [providers, setProviders] = useState<Provider[]>([]);
+  const [selectedProviderId, setSelectedProviderId] = useState<string>("");
+  
   // New appointment form
   const [newAppointment, setNewAppointment] = useState({
     title: "",
-    providerName: "",
-    providerPhone: "",
     location: "",
     date: "",
     time: "",
     reminderEnabled: true,
+    notes: "",
   });
   
   // Cancel/Reschedule form
@@ -237,12 +193,10 @@ export default function DashboardPage() {
       return;
     }
 
-    // Load dashboard data
+    // Load dashboard data from API
     const loadData = async () => {
       try {
-        // In production, call the API
-        // const data = await dashboardAPI.getDashboardData();
-        const data = getMockDashboardData();
+        const data = await dashboardAPI.getDashboardData();
         setDashboardData(data);
       } catch (error) {
         console.error("Failed to load dashboard data:", error);
@@ -251,7 +205,35 @@ export default function DashboardPage() {
       }
     };
 
+    // Load appointments from API
+    const loadAppointments = async () => {
+      try {
+        const response = await appointmentsAPI.getAppointments();
+        if (response.success && response.data) {
+          setAppointments(response.data);
+        }
+      } catch (error) {
+        console.error("Failed to load appointments:", error);
+      } finally {
+        setAppointmentsLoading(false);
+      }
+    };
+
+    // Load providers from API
+    const loadProviders = async () => {
+      try {
+        const response = await providersAPI.getProviders();
+        if (response.success && response.data) {
+          setProviders(response.data);
+        }
+      } catch (error) {
+        console.error("Failed to load providers:", error);
+      }
+    };
+
     loadData();
+    loadAppointments();
+    loadProviders();
   }, [router]);
 
   const handleLogout = () => {
@@ -288,6 +270,7 @@ export default function DashboardPage() {
     const styles: Record<AppointmentStatus, { bg: string; text: string; label: string }> = {
       upcoming: { bg: "bg-blue-100", text: "text-blue-700", label: "Upcoming" },
       done: { bg: "bg-green-100", text: "text-green-700", label: "Done" },
+      completed: { bg: "bg-green-100", text: "text-green-700", label: "Completed" },
       cancelled: { bg: "bg-gray-100", text: "text-gray-700", label: "Cancelled" },
       cancellation_in_progress: { bg: "bg-orange-100", text: "text-orange-700", label: "Cancelling..." },
       cancellation_failed: { bg: "bg-red-100", text: "text-red-700", label: "Cancel Failed" },
@@ -295,7 +278,7 @@ export default function DashboardPage() {
       rescheduling_failed: { bg: "bg-red-100", text: "text-red-700", label: "Reschedule Failed" },
       rescheduled: { bg: "bg-teal-100", text: "text-teal-700", label: "Rescheduled" },
     };
-    const style = styles[status];
+    const style = styles[status] || styles.upcoming;
     return (
       <span className={`px-2 py-1 rounded-full text-xs font-medium ${style.bg} ${style.text}`}>
         {style.label}
@@ -314,28 +297,38 @@ export default function DashboardPage() {
   );
 
   // Appointment handlers
-  const handleAddAppointment = () => {
-    if (!newAppointment.title || !newAppointment.date || !newAppointment.time) return;
+  const handleAddAppointment = async () => {
+    if (!newAppointment.title || !newAppointment.date || !newAppointment.time || !selectedProviderId) return;
     
-    const appointment: Appointment = {
-      id: Date.now().toString(),
-      ...newAppointment,
-      status: "upcoming",
-    };
-    
-    setAppointments(prev => [...prev, appointment]);
-    setShowAddAppointment(false);
-    setNewAppointment({
-      title: "",
-      providerName: "",
-      providerPhone: "",
-      location: "",
-      date: "",
-      time: "",
-      reminderEnabled: true,
-    });
-    setShowAppointmentAdded(true);
-    setTimeout(() => setShowAppointmentAdded(false), 5000);
+    try {
+      const response = await appointmentsAPI.createAppointment({
+        providerId: selectedProviderId,
+        title: newAppointment.title,
+        appointmentDate: newAppointment.date,
+        appointmentTime: newAppointment.time,
+        location: newAppointment.location || undefined,
+        reminderEnabled: newAppointment.reminderEnabled,
+        notes: newAppointment.notes || undefined,
+      });
+      
+      if (response.success && response.data) {
+        setAppointments(prev => [...prev, response.data]);
+        setShowAddAppointment(false);
+        setNewAppointment({
+          title: "",
+          location: "",
+          date: "",
+          time: "",
+          reminderEnabled: true,
+          notes: "",
+        });
+        setSelectedProviderId("");
+        setShowAppointmentAdded(true);
+        setTimeout(() => setShowAppointmentAdded(false), 5000);
+      }
+    } catch (error) {
+      console.error("Failed to create appointment:", error);
+    }
   };
 
   const handleCancelAppointment = (appointment: Appointment) => {
@@ -348,47 +341,109 @@ export default function DashboardPage() {
     setShowRescheduleModal(true);
   };
 
-  const submitCancellation = () => {
+  const submitCancellation = async () => {
     if (!selectedAppointment) return;
     
-    setAppointments(prev => prev.map(a => 
-      a.id === selectedAppointment.id 
-        ? { ...a, status: "cancellation_in_progress" as AppointmentStatus, previousStatus: a.status, canUndo: true }
-        : a
-    ));
+    try {
+      // Optimistically update UI
+      setAppointments(prev => prev.map(a => 
+        a.id === selectedAppointment.id 
+          ? { ...a, status: "cancellation_in_progress", previousStatus: a.status, canUndo: true }
+          : a
+      ));
+      
+      // Call API
+      await appointmentsAPI.cancelAppointment(
+        selectedAppointment.id,
+        undefined,
+        actionForm.preferredCallHour
+      );
+    } catch (error) {
+      console.error("Failed to cancel appointment:", error);
+      // Revert on error
+      setAppointments(prev => prev.map(a => 
+        a.id === selectedAppointment.id && a.previousStatus
+          ? { ...a, status: a.previousStatus, previousStatus: undefined, canUndo: false }
+          : a
+      ));
+    }
     
     setShowCancelModal(false);
     setSelectedAppointment(null);
   };
 
-  const submitReschedule = () => {
+  const submitReschedule = async () => {
     if (!selectedAppointment || !actionForm.newDate || !actionForm.newTime) return;
     
-    setAppointments(prev => prev.map(a => 
-      a.id === selectedAppointment.id 
-        ? { ...a, status: "rescheduling_in_progress" as AppointmentStatus, previousStatus: a.status, canUndo: true }
-        : a
-    ));
+    try {
+      // Optimistically update UI
+      setAppointments(prev => prev.map(a => 
+        a.id === selectedAppointment.id 
+          ? { ...a, status: "rescheduling_in_progress", previousStatus: a.status, canUndo: true }
+          : a
+      ));
+      
+      // Call API
+      await appointmentsAPI.rescheduleAppointment(
+        selectedAppointment.id,
+        actionForm.newDate,
+        actionForm.newTime,
+        undefined,
+        actionForm.preferredCallHour
+      );
+    } catch (error) {
+      console.error("Failed to reschedule appointment:", error);
+      // Revert on error
+      setAppointments(prev => prev.map(a => 
+        a.id === selectedAppointment.id && a.previousStatus
+          ? { ...a, status: a.previousStatus, previousStatus: undefined, canUndo: false }
+          : a
+      ));
+    }
     
     setShowRescheduleModal(false);
     setSelectedAppointment(null);
     setActionForm({ preferredCallHour: 10, newDate: "", newTime: "" });
   };
 
-  const handleUndoAction = (appointment: Appointment) => {
+  const handleUndoAction = async (appointment: Appointment) => {
     if (!appointment.canUndo || !appointment.previousStatus) return;
     
-    setAppointments(prev => prev.map(a => 
-      a.id === appointment.id 
-        ? { ...a, status: appointment.previousStatus as AppointmentStatus, previousStatus: undefined, canUndo: false }
-        : a
-    ));
+    try {
+      // Optimistically update UI
+      setAppointments(prev => prev.map(a => 
+        a.id === appointment.id 
+          ? { ...a, status: appointment.previousStatus!, previousStatus: undefined, canUndo: false }
+          : a
+      ));
+      
+      // Call API
+      await appointmentsAPI.undoAction(appointment.id);
+    } catch (error) {
+      console.error("Failed to undo action:", error);
+    }
   };
 
-  const toggleReminder = (appointmentId: string) => {
+  const toggleReminder = async (appointmentId: string) => {
+    const appointment = appointments.find(a => a.id === appointmentId);
+    if (!appointment) return;
+    
+    const newEnabled = !appointment.reminderEnabled;
+    
+    // Optimistically update UI
     setAppointments(prev => prev.map(a => 
-      a.id === appointmentId ? { ...a, reminderEnabled: !a.reminderEnabled } : a
+      a.id === appointmentId ? { ...a, reminderEnabled: newEnabled } : a
     ));
+    
+    try {
+      await appointmentsAPI.toggleReminder(appointmentId, newEnabled);
+    } catch (error) {
+      console.error("Failed to toggle reminder:", error);
+      // Revert on error
+      setAppointments(prev => prev.map(a => 
+        a.id === appointmentId ? { ...a, reminderEnabled: !newEnabled } : a
+      ));
+    }
   };
 
   // Filter and sort entries for table
@@ -886,7 +941,7 @@ export default function DashboardPage() {
                             </div>
                           </td>
                           <td className="py-3 px-4">
-                            {getStatusBadge(appointment.status)}
+                            {getStatusBadge(appointment.status as AppointmentStatus)}
                           </td>
                           <td className="py-3 px-4">
                             <button
@@ -1213,7 +1268,7 @@ export default function DashboardPage() {
                               borderRadius: "8px",
                               boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)",
                             }}
-                            formatter={(value: number, name: string) => [`${value} entries`, name]}
+                            formatter={(value) => [`${value} entries`]}
                           />
                         </PieChart>
                       </ResponsiveContainer>
@@ -1370,11 +1425,18 @@ export default function DashboardPage() {
                 <Button variant="outline" onClick={() => setShowEditProfile(false)}>
                   Cancel
                 </Button>
-                <Button onClick={() => {
-                  // Save profile changes
-                  setShowEditProfile(false);
-                  setShowChangesSaved(true);
-                  setTimeout(() => setShowChangesSaved(false), 5000);
+                <Button onClick={async () => {
+                  try {
+                    await dashboardAPI.updateProfile({
+                      familyHistory: editFamilyHistory,
+                      profileImage: profileImage || undefined,
+                    });
+                    setShowEditProfile(false);
+                    setShowChangesSaved(true);
+                    setTimeout(() => setShowChangesSaved(false), 5000);
+                  } catch (error) {
+                    console.error("Failed to save profile:", error);
+                  }
                 }}>
                   Save Changes
                 </Button>
@@ -1547,13 +1609,46 @@ export default function DashboardPage() {
                 <Button 
                   className="bg-green-500 hover:bg-green-600"
                   disabled={!selectedSymptom && !customSymptom}
-                  onClick={() => {
-                    // Add entry logic here
-                    setShowAddEntry(false);
-                    setEntryNote("");
-                    setShowEntryConfirmation(true);
-                    // Auto-hide after 5 seconds
-                    setTimeout(() => setShowEntryConfirmation(false), 5000);
+                  onClick={async () => {
+                    const symptom = selectedSymptom || customSymptom;
+                    if (!symptom) return;
+                    
+                    try {
+                      const today = new Date().toISOString().split('T')[0];
+                      const response = await dashboardAPI.addEntry({
+                        date: today,
+                        symptoms: symptom,
+                        severity: entrySeverity,
+                        category: "General",
+                        notes: entryNote || undefined,
+                      });
+                      
+                      if (response.success && response.data) {
+                        // Update dashboard data with new entry
+                        setDashboardData(prev => {
+                          if (!prev) return prev;
+                          return {
+                            ...prev,
+                            recentEntries: [response.data, ...prev.recentEntries],
+                            stats: {
+                              ...prev.stats,
+                              totalEntries: prev.stats.totalEntries + 1,
+                            },
+                          };
+                        });
+                        
+                        setShowAddEntry(false);
+                        setSelectedSymptom("");
+                        setCustomSymptom("");
+                        setSymptomSearch("");
+                        setEntrySeverity("low");
+                        setEntryNote("");
+                        setShowEntryConfirmation(true);
+                        setTimeout(() => setShowEntryConfirmation(false), 5000);
+                      }
+                    } catch (error) {
+                      console.error("Failed to add entry:", error);
+                    }
                   }}
                 >
                   <Plus size={16} className="mr-2" />
@@ -1596,42 +1691,42 @@ export default function DashboardPage() {
                 />
               </div>
               
-              {/* Provider Name */}
+              {/* Provider Selection */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Provider Name
+                  Select Provider *
                 </label>
-                <Input
-                  type="text"
-                  value={newAppointment.providerName}
-                  onChange={(e) => setNewAppointment(prev => ({ ...prev, providerName: e.target.value }))}
-                  placeholder="e.g., Dr. John Smith"
+                <Select
+                  value={selectedProviderId}
+                  onChange={(e) => setSelectedProviderId(e.target.value)}
+                  options={[
+                    { value: "", label: "-- Select a provider --" },
+                    ...providers.map(p => ({
+                      value: p.id,
+                      label: `${p.name} - ${p.specialty || 'General'}`
+                    }))
+                  ]}
+                  className="w-full"
                 />
-              </div>
-              
-              {/* Provider Phone */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Provider Phone <span className="text-gray-400 font-normal">(for Teli AI calls)</span>
-                </label>
-                <Input
-                  type="tel"
-                  value={newAppointment.providerPhone}
-                  onChange={(e) => setNewAppointment(prev => ({ ...prev, providerPhone: e.target.value }))}
-                  placeholder="(555) 123-4567"
-                />
+                {selectedProviderId && providers.find(p => p.id === selectedProviderId) && (
+                  <div className="mt-2 p-3 bg-gray-50 rounded-lg text-sm">
+                    <p className="font-medium">{providers.find(p => p.id === selectedProviderId)?.name}</p>
+                    <p className="text-gray-500">{providers.find(p => p.id === selectedProviderId)?.phoneNumber}</p>
+                    <p className="text-gray-500">{providers.find(p => p.id === selectedProviderId)?.location}</p>
+                  </div>
+                )}
               </div>
               
               {/* Location */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Location
+                  Location <span className="text-gray-400 font-normal">(override provider location)</span>
                 </label>
                 <Input
                   type="text"
                   value={newAppointment.location}
                   onChange={(e) => setNewAppointment(prev => ({ ...prev, location: e.target.value }))}
-                  placeholder="Address or 'Virtual'"
+                  placeholder="Leave blank to use provider's location"
                 />
               </div>
               
@@ -1693,7 +1788,7 @@ export default function DashboardPage() {
                 </Button>
                 <Button 
                   className="bg-blue-500 hover:bg-blue-600"
-                  disabled={!newAppointment.title || !newAppointment.date || !newAppointment.time}
+                  disabled={!newAppointment.title || !newAppointment.date || !newAppointment.time || !selectedProviderId}
                   onClick={handleAddAppointment}
                 >
                   <Plus size={16} className="mr-2" />
