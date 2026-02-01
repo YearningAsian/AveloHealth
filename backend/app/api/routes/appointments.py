@@ -36,7 +36,7 @@ class ActionType(str, Enum):
 # ============ REQUEST MODELS ============
 
 class AppointmentCreate(BaseModel):
-    providerId: str
+    providerId: Optional[str] = None
     title: str
     appointmentDate: str  # YYYY-MM-DD
     appointmentTime: str  # HH:MM
@@ -87,9 +87,9 @@ def format_appointment_response(apt: dict) -> dict:
     return {
         "id": apt.get("APPOINTMENT_ID") or apt.get("appointment_id"),
         "title": apt.get("TITLE") or apt.get("title"),
-        "providerName": apt.get("PROVIDER_NAME") or apt.get("provider_name"),
-        "providerPhone": apt.get("PROVIDER_PHONE") or apt.get("provider_phone"),
-        "providerSpecialty": apt.get("SPECIALTY") or apt.get("specialty"),
+        "providerName": apt.get("PROVIDER_NAME") or apt.get("provider_name") or "No Provider",
+        "providerPhone": apt.get("PROVIDER_PHONE") or apt.get("provider_phone") or "",
+        "providerSpecialty": apt.get("SPECIALTY") or apt.get("specialty") or "",
         "location": apt.get("LOCATION") or apt.get("location"),
         "date": str(apt.get("APPOINTMENT_DATE") or apt.get("appointment_date")),
         "time": str(apt.get("APPOINTMENT_TIME") or apt.get("appointment_time")),
@@ -236,19 +236,21 @@ async def create_appointment(
     user_id = current_user.get("sub")
     
     try:
-        # Verify provider exists
-        provider = await snowflake.get_provider_by_id(appointment_data.providerId)
-        if not provider:
-            raise HTTPException(status_code=404, detail="Provider not found")
+        # Verify provider exists if provided
+        provider = None
+        if appointment_data.providerId:
+            provider = await snowflake.get_provider_by_id(appointment_data.providerId)
+            if not provider:
+                raise HTTPException(status_code=404, detail="Provider not found")
         
         # Create appointment
         result = await snowflake.create_appointment({
             "user_id": user_id,
-            "provider_id": appointment_data.providerId,
+            "provider_id": appointment_data.providerId or None,
             "title": appointment_data.title,
             "appointment_date": appointment_data.appointmentDate,
             "appointment_time": appointment_data.appointmentTime,
-            "location": appointment_data.location or provider.get("LOCATION") or provider.get("location"),
+            "location": appointment_data.location or (provider.get("LOCATION") or provider.get("location") if provider else None),
             "status": "upcoming",
             "reminder_enabled": appointment_data.reminderEnabled,
             "notes": appointment_data.notes

@@ -1,22 +1,19 @@
 """
 Authentication Routes - Patient Signup & Login
+With Twilio Verify for phone/email verification
 """
 
 from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
 from typing import Optional
 from datetime import timedelta, datetime
-import random
-import string
 import bcrypt
 
 from app.core.auth import AuthService, get_current_user
 from app.core.config import settings
+from app.services.twilio_verify_service import twilio_verify
 
 router = APIRouter()
-
-# In-memory storage for verification codes (use Redis in production)
-verification_codes = {}
 
 class LoginRequest(BaseModel):
     email: str  # Can be email or phone number
@@ -28,10 +25,13 @@ class LoginResponse(BaseModel):
     user: dict
 
 class SendVerificationRequest(BaseModel):
-    phoneNumber: str
+    phoneNumber: Optional[str] = None
+    email: Optional[str] = None
+    channel: Optional[str] = "sms"  # "sms", "email", or "call"
 
-class VerifyPhoneRequest(BaseModel):
-    phoneNumber: str
+class VerifyCodeRequest(BaseModel):
+    phoneNumber: Optional[str] = None
+    email: Optional[str] = None
     code: str
 
 class SignUpRequest(BaseModel):
@@ -121,53 +121,100 @@ async def login(credentials: LoginRequest, request: Request):
 
 @router.post("/send-verification")
 async def send_verification_code(request: SendVerificationRequest):
-    """Send phone verification code"""
+    """
+    Send verification code via Twilio Verify
+    Supports SMS, email, and voice call
+    """
     
-    # Generate 6-digit code
-    code = ''.join(random.choices(string.digits, k=6))
+    if not request.phoneNumber and not request.email:
+        raise HTTPException(
+            status_code=400, 
+            detail="Either phoneNumber or email is required"
+        )
     
-    # Store code (expires in 10 minutes)
-    phone_clean = request.phoneNumber.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
-    verification_codes[phone_clean] = {
-        "code": code,
-        "expires": datetime.utcnow().timestamp() + 600  # 10 minutes
-    }
-    
-    # In production, send SMS via Twilio/similar
-    print(f"📱 Verification code for {phone_clean}: {code}")
-    
-    return {
-        "success": True,
-        "message": "Verification code sent",
-        # Include code in dev mode for testing
-        "debug_code": code if settings.DEBUG else None
-    }
+    try:
+        if request.email and request.channel == "email":
+            # Send email verification
+            result = await twilio_verify.send_email_verification(request.email)
+        elif request.phoneNumber:
+            # Send SMS or voice verification
+            if request.channel == "call":
+                result = await twilio_verify.send_verification(
+                    request.phoneNumber, "call"
+                )
+            else:
+                result = await twilio_verify.send_phone_verification(request.phoneNumber)
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid verification request"
+            )
+        
+        if not result.get("success"):
+            raise HTTPException(
+                status_code=400,
+                detail=result.get("error", "Failed to send verification")
+            )
+        
+        return {
+            "success": True,
+            "message": f"Verification code sent via {request.channel or 'sms'}",
+            "channel": result.get("channel"),
+            "debug_mode": result.get("debug_mode", False)
+        }
+        
+    except Exception as e:
+        print(f"Verification error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.post("/verify-phone")
-async def verify_phone(request: VerifyPhoneRequest):
-    """Verify phone number with code"""
+async def verify_phone(request: VerifyCodeRequest):
+    """
+    Verify phone number or email with code via Twilio Verify
+    """
     
-    phone_clean = request.phoneNumber.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+    if not request.phoneNumber and not request.email:
+        raise HTTPException(
+            status_code=400,
+            detail="Either phoneNumber or email is required"
+        )
     
-    stored = verification_codes.get(phone_clean)
+    try:
+        if request.email:
+            result = await twilio_verify.verify_email(request.email, request.code)
+        else:
+            result = await twilio_verify.verify_phone(request.phoneNumber, request.code)
+        
+        if not result.get("success"):
+            raise HTTPException(
+                status_code=400,
+                detail=result.get("error", "Invalid verification code")
+            )
+        
+        return {
+            "success": True,
+            "message": "Verification successful",
+            "status": result.get("status")
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Verification check error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/verify-email")
+async def verify_email(request: VerifyCodeRequest):
+    """
+    Verify email address with code via Twilio Verify
+    Alias endpoint for email verification
+    """
+    if not request.email:
+        raise HTTPException(status_code=400, detail="Email is required")
     
-    if not stored:
-        raise HTTPException(status_code=400, detail="No verification code found. Please request a new code.")
-    
-    if datetime.utcnow().timestamp() > stored["expires"]:
-        del verification_codes[phone_clean]
-        raise HTTPException(status_code=400, detail="Verification code expired. Please request a new code.")
-    
-    if stored["code"] != request.code:
-        raise HTTPException(status_code=400, detail="Invalid verification code")
-    
-    # Clean up
-    del verification_codes[phone_clean]
-    
-    return {
-        "success": True,
-        "message": "Phone number verified"
-    }
+    return await verify_phone(request)
 
 @router.post("/signup", response_model=SignUpResponse)
 async def signup(request: SignUpRequest, req: Request):
