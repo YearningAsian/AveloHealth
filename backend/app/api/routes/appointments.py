@@ -113,22 +113,20 @@ async def get_appointment_stats(
 ):
     """Get appointment statistics"""
     
-    # Placeholder stats - would come from aggregated queries
-    stats = {
-        "totalScheduled": 150,
-        "totalCompleted": 120,
-        "totalCancelled": 15,
-        "totalNoShows": 10,
-        "noShowRate": 6.7,
-        "upcomingToday": 12,
-        "upcomingWeek": 45
-    }
+    snowflake: SnowflakeClient = request.app.state.snowflake
+    user_id = current_user.get("sub")
     
-    return {
-        "success": True,
-        "data": stats,
-        "timestamp": datetime.utcnow().isoformat()
-    }
+    try:
+        stats = await snowflake.get_appointment_stats(user_id=user_id)
+        
+        return {
+            "success": True,
+            "data": stats,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        print(f"Appointment stats error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch appointment stats")
 
 @router.get("/dashboard")
 async def get_dashboard_stats(
@@ -140,20 +138,7 @@ async def get_dashboard_stats(
     snowflake: SnowflakeClient = request.app.state.snowflake
     
     try:
-        stats = await snowflake.get_dashboard_stats()
-        
-        dashboard_data = {
-            **stats,
-            "new_patients_this_month": 25,
-            "active_patients": stats.get("total_patients", 0) * 0.85,
-            "patients_needing_outreach": stats.get("high_risk_patients", 0),
-            "appointments_today": 12,
-            "appointments_this_week": 45,
-            "no_show_rate": 6.7,
-            "average_risk_score": 45.5,
-            "patient_response_rate": 87.3,
-            "average_time_to_contact": 4.2
-        }
+        dashboard_data = await snowflake.get_comprehensive_dashboard_stats()
         
         return {
             "success": True,

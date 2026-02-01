@@ -135,6 +135,190 @@ class SnowflakeClient:
         
         return stats
     
+    async def get_appointment_stats(self, user_id: Optional[str] = None) -> Dict[str, Any]:
+        """Get appointment statistics from database"""
+        stats = {}
+        
+        # Base filter
+        user_filter = "WHERE user_id = %(user_id)s" if user_id else ""
+        params = {"user_id": user_id} if user_id else {}
+        
+        # Total scheduled (upcoming)
+        result = await self.execute(f"""
+            SELECT COUNT(*) as count FROM appointments 
+            {user_filter} {"AND" if user_filter else "WHERE"} status = 'upcoming'
+        """, params)
+        stats['totalScheduled'] = result[0]['COUNT'] if result else 0
+        
+        # Total completed
+        result = await self.execute(f"""
+            SELECT COUNT(*) as count FROM appointments 
+            {user_filter} {"AND" if user_filter else "WHERE"} status = 'completed'
+        """, params)
+        stats['totalCompleted'] = result[0]['COUNT'] if result else 0
+        
+        # Total cancelled
+        result = await self.execute(f"""
+            SELECT COUNT(*) as count FROM appointments 
+            {user_filter} {"AND" if user_filter else "WHERE"} status = 'cancelled'
+        """, params)
+        stats['totalCancelled'] = result[0]['COUNT'] if result else 0
+        
+        # Upcoming today
+        result = await self.execute(f"""
+            SELECT COUNT(*) as count FROM appointments 
+            {user_filter} {"AND" if user_filter else "WHERE"} 
+            appointment_date = CURRENT_DATE() AND status = 'upcoming'
+        """, params)
+        stats['upcomingToday'] = result[0]['COUNT'] if result else 0
+        
+        # Upcoming this week
+        result = await self.execute(f"""
+            SELECT COUNT(*) as count FROM appointments 
+            {user_filter} {"AND" if user_filter else "WHERE"} 
+            appointment_date BETWEEN CURRENT_DATE() AND DATEADD(day, 7, CURRENT_DATE())
+            AND status = 'upcoming'
+        """, params)
+        stats['upcomingWeek'] = result[0]['COUNT'] if result else 0
+        
+        # Calculate no-show rate
+        total = stats['totalCompleted'] + stats['totalCancelled']
+        stats['totalNoShows'] = 0  # Would need a 'no_show' status to track this
+        stats['noShowRate'] = 0 if total == 0 else round((stats['totalNoShows'] / total) * 100, 1)
+        
+        return stats
+    
+    async def get_comprehensive_dashboard_stats(self) -> Dict[str, Any]:
+        """Get comprehensive dashboard statistics for admin view"""
+        stats = {}
+        
+        # Total users/patients
+        result = await self.execute("SELECT COUNT(*) as count FROM users WHERE role = 'patient'")
+        stats['total_patients'] = result[0]['COUNT'] if result else 0
+        
+        # New patients this month
+        result = await self.execute("""
+            SELECT COUNT(*) as count FROM users 
+            WHERE role = 'patient' 
+            AND created_at >= DATE_TRUNC('month', CURRENT_DATE())
+        """)
+        stats['new_patients_this_month'] = result[0]['COUNT'] if result else 0
+        
+        # Total patient calls
+        result = await self.execute("SELECT COUNT(*) as count FROM patient_calls")
+        stats['total_calls'] = result[0]['COUNT'] if result else 0
+        
+        # Appointments today
+        result = await self.execute("""
+            SELECT COUNT(*) as count FROM appointments 
+            WHERE appointment_date = CURRENT_DATE() AND status = 'upcoming'
+        """)
+        stats['appointments_today'] = result[0]['COUNT'] if result else 0
+        
+        # Appointments this week
+        result = await self.execute("""
+            SELECT COUNT(*) as count FROM appointments 
+            WHERE appointment_date BETWEEN CURRENT_DATE() AND DATEADD(day, 7, CURRENT_DATE())
+            AND status = 'upcoming'
+        """)
+        stats['appointments_this_week'] = result[0]['COUNT'] if result else 0
+        
+        # Total providers
+        result = await self.execute("SELECT COUNT(*) as count FROM providers")
+        stats['total_providers'] = result[0]['COUNT'] if result else 0
+        
+        # High severity diary entries (patients needing outreach)
+        result = await self.execute("""
+            SELECT COUNT(DISTINCT user_id) as count FROM diary_entries 
+            WHERE severity = 'high' 
+            AND entry_date >= DATEADD(day, -7, CURRENT_DATE())
+        """)
+        stats['patients_needing_outreach'] = result[0]['COUNT'] if result else 0
+        
+        # Active patients (with recent diary entries)
+        result = await self.execute("""
+            SELECT COUNT(DISTINCT user_id) as count FROM diary_entries 
+            WHERE entry_date >= DATEADD(day, -30, CURRENT_DATE())
+        """)
+        stats['active_patients'] = result[0]['COUNT'] if result else 0
+        
+        # Completed appointments
+        result = await self.execute("SELECT COUNT(*) as count FROM appointments WHERE status = 'completed'")
+        completed = result[0]['COUNT'] if result else 0
+        
+        # Cancelled appointments
+        result = await self.execute("SELECT COUNT(*) as count FROM appointments WHERE status = 'cancelled'")
+        cancelled = result[0]['COUNT'] if result else 0
+        
+        # Calculate no-show rate
+        total = completed + cancelled
+        stats['no_show_rate'] = 0 if total == 0 else round((cancelled / total) * 100, 1)
+        
+        return stats
+    
+    # ============ PATIENT OPERATIONS ============
+    
+    async def get_patients(self, risk_level: Optional[str] = None, limit: int = 100, offset: int = 0) -> List[Dict]:
+        """Get all patients with optional risk level filter"""
+        if risk_level:
+            return await self.execute("""
+                SELECT u.user_id as id, u.name, u.email, u.phone_number, u.date_of_birth,
+                       u.created_at,
+                       COALESCE(
+                           (SELECT severity FROM diary_entries 
+                            WHERE user_id = u.user_id 
+                            ORDER BY entry_date DESC LIMIT 1), 
+                           'low'
+                       ) as risk_level
+                FROM users u
+                WHERE u.role = 'patient'
+                HAVING risk_level = %(risk_level)s
+                ORDER BY u.name
+                LIMIT %(limit)s OFFSET %(offset)s
+            """, {"risk_level": risk_level, "limit": limit, "offset": offset})
+        else:
+            return await self.execute("""
+                SELECT u.user_id as id, u.name, u.email, u.phone_number, u.date_of_birth,
+                       u.created_at,
+                       COALESCE(
+                           (SELECT severity FROM diary_entries 
+                            WHERE user_id = u.user_id 
+                            ORDER BY entry_date DESC LIMIT 1), 
+                           'low'
+                       ) as risk_level
+                FROM users u
+                WHERE u.role = 'patient'
+                ORDER BY u.name
+                LIMIT %(limit)s OFFSET %(offset)s
+            """, {"limit": limit, "offset": offset})
+    
+    async def get_patient(self, patient_id: str) -> Optional[Dict]:
+        """Get a specific patient by ID"""
+        result = await self.execute("""
+            SELECT u.user_id as id, u.name, u.email, u.phone_number, u.date_of_birth,
+                   u.account_number, u.created_at,
+                   (SELECT COUNT(*) FROM diary_entries WHERE user_id = u.user_id) as total_entries,
+                   (SELECT COUNT(*) FROM appointments WHERE user_id = u.user_id) as total_appointments
+            FROM users u
+            WHERE u.user_id = %(patient_id)s AND u.role = 'patient'
+        """, {"patient_id": patient_id})
+        return result[0] if result else None
+    
+    async def get_high_risk_patients(self, limit: int = 50) -> List[Dict]:
+        """Get patients with high severity diary entries recently"""
+        return await self.execute("""
+            SELECT DISTINCT u.user_id as id, u.name, u.email, u.phone_number,
+                   d.entry_date as last_high_severity_date,
+                   d.symptoms as last_symptoms
+            FROM users u
+            JOIN diary_entries d ON u.user_id = d.user_id
+            WHERE u.role = 'patient'
+            AND d.severity = 'high'
+            AND d.entry_date >= DATEADD(day, -30, CURRENT_DATE())
+            ORDER BY d.entry_date DESC
+            LIMIT %(limit)s
+        """, {"limit": limit})
+    
     # ============ USER OPERATIONS ============
     
     async def get_user_by_id(self, user_id: str) -> Optional[Dict]:
@@ -202,18 +386,24 @@ class SnowflakeClient:
         
         if status:
             return await self.execute("""
-                SELECT a.*, p.name as provider_name, p.phone_number as provider_phone, p.specialty
+                SELECT a.*, 
+                       COALESCE(p.name, 'Unknown Provider') as provider_name, 
+                       COALESCE(p.phone_number, '') as provider_phone, 
+                       COALESCE(p.specialty, '') as specialty
                 FROM appointments a
-                JOIN providers p ON a.provider_id = p.provider_id
+                LEFT JOIN providers p ON a.provider_id = p.provider_id
                 WHERE a.user_id = %(user_id)s AND a.status = %(status)s
                 ORDER BY a.appointment_date DESC, a.appointment_time DESC
                 LIMIT %(limit)s
             """, {"user_id": user_id, "status": status, "limit": limit})
         else:
             return await self.execute("""
-                SELECT a.*, p.name as provider_name, p.phone_number as provider_phone, p.specialty
+                SELECT a.*, 
+                       COALESCE(p.name, 'Unknown Provider') as provider_name, 
+                       COALESCE(p.phone_number, '') as provider_phone, 
+                       COALESCE(p.specialty, '') as specialty
                 FROM appointments a
-                JOIN providers p ON a.provider_id = p.provider_id
+                LEFT JOIN providers p ON a.provider_id = p.provider_id
                 WHERE a.user_id = %(user_id)s
                 ORDER BY a.appointment_date DESC, a.appointment_time DESC
                 LIMIT %(limit)s
@@ -222,9 +412,12 @@ class SnowflakeClient:
     async def get_appointment_by_id(self, appointment_id: str) -> Optional[Dict]:
         """Get single appointment with provider details"""
         result = await self.execute("""
-            SELECT a.*, p.name as provider_name, p.phone_number as provider_phone, p.specialty
+            SELECT a.*, 
+                   COALESCE(p.name, 'Unknown Provider') as provider_name, 
+                   COALESCE(p.phone_number, '') as provider_phone, 
+                   COALESCE(p.specialty, '') as specialty
             FROM appointments a
-            JOIN providers p ON a.provider_id = p.provider_id
+            LEFT JOIN providers p ON a.provider_id = p.provider_id
             WHERE a.appointment_id = %(appointment_id)s
         """, {"appointment_id": appointment_id})
         return result[0] if result else None
@@ -439,17 +632,14 @@ class SnowflakeClient:
         import uuid
         
         await self.execute("""
-            INSERT INTO audit_logs (log_id, user_id, action, resource_type, resource_id, ip_address, user_agent, details, phi_accessed)
-            VALUES (%(log_id)s, %(user_id)s, %(action)s, %(resource_type)s, %(resource_id)s, %(ip_address)s, %(user_agent)s, %(details)s, %(phi_accessed)s)
+            INSERT INTO audit_logs (log_id, user_id, action, resource_type, resource_id, details)
+            VALUES (%(log_id)s, %(user_id)s, %(action)s, %(resource_type)s, %(resource_id)s, %(details)s)
         """, {
             "log_id": str(uuid.uuid4()),
             "user_id": entry.get("user_id"),
             "action": entry.get("action"),
             "resource_type": entry.get("resource_type"),
             "resource_id": entry.get("resource_id"),
-            "ip_address": entry.get("ip_address"),
-            "user_agent": entry.get("user_agent"),
             "details": json.dumps(entry.get("details", {})),
-            "phi_accessed": entry.get("phi_accessed", False)
         })
         return True

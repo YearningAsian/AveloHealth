@@ -8,6 +8,7 @@ import { Footer } from "@/components/Footer";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dropdown, DropdownDivider } from "@/components/ui/dropdown";
+import { authAPI } from "@/lib/api";
 import {
   Heart,
   BookOpen,
@@ -120,26 +121,23 @@ export default function LandingPage() {
     setLoginError("");
 
     try {
-      // Demo login - accepts email or phone
-      const isEmail = loginIdentifier.includes("@");
-      const isValidDemo = 
-        (loginIdentifier === "demo@avelohealth.com" || loginIdentifier === "(555) 123-4567" || loginIdentifier === "5551234567") 
-        && password === "demo123";
+      // Call the backend API to authenticate
+      const response = await authAPI.login({
+        email: loginIdentifier,
+        password: password,
+      });
 
-      if (isValidDemo) {
-        localStorage.setItem("auth_token", "demo_token");
-        localStorage.setItem("user", JSON.stringify({ 
-          id: "user_001", 
-          name: "Sarah Johnson",
-          email: isEmail ? loginIdentifier : "demo@avelohealth.com",
-          phone: !isEmail ? loginIdentifier : "(555) 123-4567"
-        }));
+      if (response.success && response.token) {
+        localStorage.setItem("auth_token", response.token);
+        localStorage.setItem("user", JSON.stringify(response.user));
         router.push("/dashboard");
       } else {
-        setLoginError("Invalid credentials. Try demo@avelohealth.com or (555) 123-4567 with password: demo123");
+        setLoginError("Invalid credentials. Please try again.");
       }
-    } catch {
-      setLoginError("Login failed. Please try again.");
+    } catch (error: unknown) {
+      const axiosError = error as { response?: { data?: { detail?: string } } };
+      const errorMessage = axiosError.response?.data?.detail || "Login failed. Please try again.";
+      setLoginError(errorMessage);
     } finally {
       setIsLoggingIn(false);
     }
