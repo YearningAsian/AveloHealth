@@ -25,36 +25,38 @@ export function Header() {
         <nav className="hidden md:flex items-center gap-6">
           {/* Solutions Dropdown */}
           <div 
-            className="relative"
+            className="relative py-4 -my-4"
             onMouseEnter={() => setSolutionsOpen(true)}
             onMouseLeave={() => setSolutionsOpen(false)}
             role="navigation"
           >
-            <button className="flex items-center gap-1 text-sm font-medium text-foreground hover:text-primary transition-colors">
+            <button className="flex items-center gap-1 text-sm font-medium text-foreground hover:text-primary transition-colors py-2">
               Solutions
               <ChevronDown className={`h-4 w-4 transition-transform ${solutionsOpen ? 'rotate-180' : ''}`} />
             </button>
             
             {solutionsOpen && (
-              <div className="absolute top-full left-0 mt-2 w-56 bg-background border rounded-lg shadow-lg overflow-hidden">
-                <Link 
-                  href="/solutions/crm"
-                  className="block px-4 py-3 hover:bg-muted transition-colors"
-                >
-                  <div className="font-medium text-sm">CRM Platform</div>
-                  <div className="text-xs text-muted-foreground mt-1">
-                    Intelligent patient care management
-                  </div>
-                </Link>
-                <Link 
-                  href="/solutions/quick-diagnosis"
-                  className="block px-4 py-3 hover:bg-muted transition-colors border-t"
-                >
-                  <div className="font-medium text-sm">QuickDiagnosis</div>
-                  <div className="text-xs text-muted-foreground mt-1">
-                    AI-powered symptom assessment tool
-                  </div>
-                </Link>
+              <div className="absolute top-full left-0 pt-2 w-56">
+                <div className="bg-background border rounded-lg shadow-lg overflow-hidden">
+                  <Link 
+                    href="/solutions/crm"
+                    className="block px-4 py-3 hover:bg-muted transition-colors"
+                  >
+                    <div className="font-medium text-sm">CRM Platform</div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      Intelligent patient care management
+                    </div>
+                  </Link>
+                  <Link 
+                    href="/solutions/quick-diagnosis"
+                    className="block px-4 py-3 hover:bg-muted transition-colors border-t"
+                  >
+                    <div className="font-medium text-sm">QuickDiagnosis</div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      AI-powered symptom assessment tool
+                    </div>
+                  </Link>
+                </div>
               </div>
             )}
           </div>
