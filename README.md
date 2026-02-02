@@ -124,7 +124,7 @@ AveloHealth2/
 - **FastAPI** - Python web framework
 - **Pydantic** - Data validation
 - **Snowflake** - Data warehouse (optional)
-- **Google Gemini** - AI analysis (optional)
+- **Snowflake Cortex** - AI analysis (built-in)
 
 ## 📊 Dashboard Features
 

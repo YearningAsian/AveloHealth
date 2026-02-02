@@ -643,3 +643,136 @@ class SnowflakeClient:
             "details": json.dumps(entry.get("details", {})),
         })
         return True
+
+    # ============ AI HEALTH INSIGHTS (Snowflake Cortex) ============
+
+    async def generate_health_insights(self, entries: List[Dict], user_info: Dict) -> Dict[str, Any]:
+        """
+        Generate AI health insights using Snowflake Cortex COMPLETE function
+        Uses mistral-large model for efficient analysis
+        """
+        if not entries:
+            return {
+                "success": True,
+                "insights": ["Start logging entries to receive personalized health insights."],
+                "recommendations": ["Log your first symptom to get started!"],
+                "summary": "No entries to analyze yet."
+            }
+        
+        try:
+            # Build symptoms summary for the prompt
+            symptoms_list = []
+            severity_counts = {"high": 0, "medium": 0, "low": 0}
+            
+            for entry in entries[:20]:  # Limit to last 20 entries
+                symptom = entry.get("symptoms", "Unknown")
+                severity = entry.get("severity", "low").lower()
+                date = entry.get("date", "N/A")
+                notes = entry.get("notes", "")
+                
+                symptoms_list.append(f"{date}: {symptom} (Severity: {severity}){' - ' + notes if notes else ''}")
+                if severity in severity_counts:
+                    severity_counts[severity] += 1
+            
+            symptoms_text = "\\n".join(symptoms_list[:10])  # Limit text for prompt
+            
+            # Build the prompt
+            prompt = f"""You are a supportive health assistant analyzing a patient's health diary.
+
+Patient: {user_info.get('name', 'Patient')}, Age: {user_info.get('age', 'Unknown')}
+Total entries: {len(entries)}
+Severity breakdown - High: {severity_counts['high']}, Medium: {severity_counts['medium']}, Low: {severity_counts['low']}
+
+Recent entries:
+{symptoms_text}
+
+Provide a brief, encouraging health analysis. Return ONLY a valid JSON object with these exact keys:
+{{
+  "insights": ["insight 1", "insight 2"],
+  "recommendations": ["recommendation 1", "recommendation 2"],
+  "summary": "A brief encouraging summary"
+}}
+
+IMPORTANT: Do NOT diagnose. Be supportive. Recommend consulting healthcare providers for concerns."""
+
+            # Use Snowflake Cortex COMPLETE function
+            result = await self.execute(f"""
+                SELECT SNOWFLAKE.CORTEX.COMPLETE(
+                    'mistral-large',
+                    '{prompt.replace("'", "''")}'
+                ) AS ai_response
+            """)
+            
+            if result and result[0]:
+                ai_response = result[0].get('AI_RESPONSE', '')
+                
+                # Parse JSON response
+                try:
+                    # Clean up the response - extract JSON if wrapped in markdown
+                    response_text = ai_response.strip()
+                    if '```json' in response_text:
+                        response_text = response_text.split('```json')[1].split('```')[0].strip()
+                    elif '```' in response_text:
+                        response_text = response_text.split('```')[1].split('```')[0].strip()
+                    
+                    # Find JSON object
+                    start_idx = response_text.find('{')
+                    end_idx = response_text.rfind('}') + 1
+                    if start_idx != -1 and end_idx > start_idx:
+                        json_str = response_text[start_idx:end_idx]
+                        parsed = json.loads(json_str)
+                        
+                        return {
+                            "success": True,
+                            "insights": parsed.get("insights", [])[:3],
+                            "recommendations": parsed.get("recommendations", [])[:3],
+                            "summary": parsed.get("summary", "Keep tracking your health!")
+                        }
+                except json.JSONDecodeError as e:
+                    print(f"JSON parse error: {e}, raw: {ai_response[:200]}")
+                    # Fallback: extract useful text
+                    return self._generate_fallback_insights(entries, severity_counts)
+            
+            return self._generate_fallback_insights(entries, severity_counts)
+            
+        except Exception as e:
+            print(f"Cortex AI error: {e}")
+            return self._generate_fallback_insights(entries, severity_counts if 'severity_counts' in dir() else {"high": 0, "medium": 0, "low": 0})
+    
+    def _generate_fallback_insights(self, entries: List[Dict], severity_counts: Dict) -> Dict[str, Any]:
+        """Generate fallback insights when AI is unavailable"""
+        insights = []
+        recommendations = []
+        
+        # Analyze severity distribution
+        total = sum(severity_counts.values())
+        if severity_counts.get("high", 0) > 0:
+            insights.append(f"You have {severity_counts['high']} high-severity entries that may need attention.")
+            recommendations.append("Consider scheduling a check-up to discuss your high-severity symptoms.")
+        
+        if total > 5:
+            insights.append(f"You've logged {total} entries recently - great job tracking your health!")
+        
+        # Find most common symptom
+        symptom_counts = {}
+        for entry in entries[:20]:
+            symptom = entry.get("symptoms", "")
+            if symptom:
+                symptom_counts[symptom] = symptom_counts.get(symptom, 0) + 1
+        
+        if symptom_counts:
+            most_common = max(symptom_counts, key=symptom_counts.get)
+            insights.append(f"Your most frequently logged symptom is '{most_common}'.")
+            recommendations.append("Keep tracking patterns to identify potential triggers.")
+        
+        if not insights:
+            insights = ["Continue logging your symptoms to build a clearer health picture."]
+        if not recommendations:
+            recommendations = ["Regular tracking helps you and your healthcare provider make informed decisions."]
+        
+        return {
+            "success": True,
+            "insights": insights[:3],
+            "recommendations": recommendations[:3],
+            "summary": "Keep up the great work tracking your health journey!"
+        }

@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     # Twilio Configuration
     TWILIO_ACCOUNT_SID: str = ""
     TWILIO_AUTH_TOKEN: str = ""
-    TWILIO_VERIFY_SERVICE_SID: str = "VAdd2abdb9d5a76d83f09a051854bfca10"
+    TWILIO_VERIFY_SERVICE_SID: str = ""
     
     # CORS
     ALLOWED_ORIGINS: List[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
@@ -40,10 +40,18 @@ class Settings(BaseSettings):
     SNOWFLAKE_DATABASE: str = "AVELOHEALTH_DB"
     SNOWFLAKE_SCHEMA: str = "PUBLIC"
     
-    # AI Services
-    GEMINI_API_KEY: str = ""
-    TELI_AI_API_KEY: str = ""
-    TELI_AI_WEBHOOK_URL: str = "http://localhost:8000/api"
+    # AI Services (Snowflake Cortex is used for AI - no external API keys needed)
+    
+    # Teli AI Configuration
+    TELI_API_KEY: str = ""
+    TELI_API_URL: str = "https://teli-hackathon--transfer-message-service-fastapi-app.modal.run"
+    TELI_DEFAULT_PHONE: str = ""  # Default phone for testing
+    TELI_ORG_ID: str = ""  # Teli organization ID
+    TELI_USER_ID: str = ""  # Teli user ID
+    TELI_SMS_AGENT_ID: str = ""  # Teli SMS agent ID for AI conversations
+    TELI_VOICE_AGENT_ID: str = ""  # Teli voice agent ID for AI calls
+    TELI_OUTBOUND_NUMBER: str = ""  # Default outbound number for calls/SMS
+    TELI_SMS_NUMBER: str = ""  # Teli SMS sending number
     
     class Config:
         env_file = ".env"

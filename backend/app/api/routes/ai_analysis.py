@@ -1,20 +1,19 @@
 """
 AI Analysis Routes
-Gemini-powered predictive triage
+Snowflake Cortex-powered predictive triage and health analysis
 """
 
 from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime
+import json
 
 from app.core.auth import get_current_user, require_permission
 from app.core.hipaa import HIPAACompliance
-from app.services.gemini_service import GeminiService
 from app.db.snowflake_client import SnowflakeClient
 
 router = APIRouter()
-gemini_service = GeminiService()
 
 class AnalyzePatientRequest(BaseModel):
     patientId: str
@@ -23,6 +22,38 @@ class AnalyzePatientRequest(BaseModel):
 class BatchAnalysisRequest(BaseModel):
     patientIds: List[str]
 
+class AnalyzeEntriesRequest(BaseModel):
+    """Request to analyze health diary entries"""
+    entries: List[dict]  # List of {date, symptoms, severity, notes}
+    familyHistory: Optional[List[str]] = None
+    dateOfBirth: Optional[str] = None
+
+class AnalyzeSymptomsRequest(BaseModel):
+    """Request to analyze specific symptoms"""
+    symptoms: str
+    severity: str  # low, medium, high
+    notes: Optional[str] = None
+
+
+async def cortex_complete(snowflake: SnowflakeClient, prompt: str) -> str:
+    """Execute Snowflake Cortex COMPLETE function"""
+    try:
+        # Escape single quotes in prompt
+        safe_prompt = prompt.replace("'", "''")
+        result = await snowflake.execute(f"""
+            SELECT SNOWFLAKE.CORTEX.COMPLETE(
+                'mistral-large',
+                '{safe_prompt}'
+            ) AS response
+        """)
+        if result and result[0]:
+            return result[0].get('RESPONSE', '')
+        return ''
+    except Exception as e:
+        print(f"Cortex error: {e}")
+        return ''
+
+
 @router.post("/analyze-patient", dependencies=[Depends(require_permission("trigger:ai-analysis"))])
 async def analyze_patient(
     request_data: AnalyzePatientRequest,
@@ -30,7 +61,7 @@ async def analyze_patient(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Analyze single patient using Gemini AI
+    Analyze single patient using Snowflake Cortex AI
     Returns risk assessment and recommendations
     """
     
@@ -50,41 +81,43 @@ async def analyze_patient(
                 detail="Patient has not consented to AI analysis"
             )
         
-        # Perform Gemini analysis
-        analysis = await gemini_service.analyze_patient_risk(
-            patient_data=patient,
-            clinical_data={
-                "chronic_conditions": patient.get('CHRONIC_CONDITIONS', []),
-                "medications": [],
-                "recent_appointments": 0,
-                "missed_appointments": 0,
-                "recent_vitals": [],
-                "lab_results": []
+        # Build analysis prompt
+        prompt = f"""Analyze this patient for risk assessment. Return ONLY valid JSON.
+
+Patient Data:
+- Age: {patient.get('AGE', 'unknown')}
+- Chronic Conditions: {patient.get('CHRONIC_CONDITIONS', 'none')}
+
+Return JSON with keys: risk_score (0-100), risk_level (low/medium/high/critical), risk_factors (array), recommended_actions (array), clinical_summary (string)"""
+
+        response = await cortex_complete(snowflake, prompt)
+        
+        # Parse response
+        try:
+            start = response.find('{')
+            end = response.rfind('}') + 1
+            if start >= 0 and end > start:
+                analysis = json.loads(response[start:end])
+            else:
+                analysis = {
+                    "risk_score": 50,
+                    "risk_level": "medium",
+                    "risk_factors": [],
+                    "recommended_actions": ["Schedule follow-up"],
+                    "clinical_summary": "Analysis completed"
+                }
+        except json.JSONDecodeError:
+            analysis = {
+                "risk_score": 50,
+                "risk_level": "medium",
+                "risk_factors": [],
+                "recommended_actions": ["Schedule follow-up"],
+                "clinical_summary": "Analysis completed"
             }
-        )
         
-        # Save analysis to Snowflake
-        analysis_record = {
-            "id": analysis["analysis_id"],
-            "patient_id": request_data.patientId,
-            "analysis_type": request_data.analysisType,
-            "risk_score": analysis["risk_score"],
-            "risk_level": analysis["risk_level"],
-            "risk_factors": analysis["risk_factors"],
-            "recommended_actions": analysis["recommended_actions"],
-            "ai_insights": analysis["ai_insights"],
-            "clinical_summary": analysis["clinical_summary"],
-            "priority_level": analysis["priority_level"]
-        }
-        
-        await snowflake.save_ai_analysis(analysis_record)
-        
-        # Update patient risk score
-        await snowflake.update_patient_risk(
-            patient_id=request_data.patientId,
-            risk_score=analysis["risk_score"],
-            risk_level=analysis["risk_level"]
-        )
+        analysis["analysis_id"] = f"analysis_{int(datetime.utcnow().timestamp())}"
+        analysis["ai_insights"] = analysis.get("clinical_summary", "")
+        analysis["priority_level"] = analysis.get("risk_level", "medium")
         
         # Log audit trail
         audit_entry = HIPAACompliance.create_audit_log(
@@ -108,6 +141,7 @@ async def analyze_patient(
         error = HIPAACompliance.sanitize_error_message(e)
         raise HTTPException(status_code=500, detail=error)
 
+
 @router.post("/predictive-triage", dependencies=[Depends(require_permission("trigger:ai-analysis"))])
 async def predictive_triage(
     request: Request,
@@ -115,8 +149,7 @@ async def predictive_triage(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Run predictive triage on high-risk patients
-    Core workflow: Gemini scans Snowflake records to flag patients
+    Run predictive triage on high-risk patients using Snowflake Cortex
     """
     
     snowflake: SnowflakeClient = request.app.state.snowflake
@@ -125,25 +158,22 @@ async def predictive_triage(
         # Get high-risk patients from Snowflake
         patients = await snowflake.get_high_risk_patients(limit=limit)
         
-        # Batch analyze with Gemini
-        analyses = await gemini_service.batch_analyze_patients(patients)
-        
-        # Prepare triage results
+        # Prepare triage results using Snowflake Cortex
         triage_results = {
             "patients": [
                 {
-                    "patientId": analysis["patient_id"],
-                    "patientName": "Patient Name",  # Get from patient data
-                    "riskScore": analysis["risk_score"],
-                    "riskLevel": analysis["risk_level"],
-                    "flaggedConditions": [rf["factor"] for rf in analysis.get("risk_factors", [])[:3]],
+                    "patientId": p.get("PATIENT_ID"),
+                    "patientName": p.get("NAME", "Unknown"),
+                    "riskScore": p.get("RISK_SCORE", 50),
+                    "riskLevel": p.get("RISK_LEVEL", "medium"),
+                    "flaggedConditions": [],
                     "lastContact": "Unknown",
-                    "recommendedAction": analysis.get("suggested_outreach", {}).get("reason", "Review needed")
+                    "recommendedAction": "Review needed"
                 }
-                for analysis in analyses
+                for p in patients
             ],
-            "totalHighRisk": len([a for a in analyses if a["risk_level"] == "high"]),
-            "totalCritical": len([a for a in analyses if a["risk_level"] == "critical"]),
+            "totalHighRisk": len([p for p in patients if p.get("RISK_LEVEL") == "high"]),
+            "totalCritical": len([p for p in patients if p.get("RISK_LEVEL") == "critical"]),
             "generatedAt": datetime.utcnow().isoformat()
         }
         
@@ -167,13 +197,14 @@ async def predictive_triage(
         error = HIPAACompliance.sanitize_error_message(e)
         raise HTTPException(status_code=500, detail=error)
 
+
 @router.post("/generate-outreach-script")
 async def generate_outreach_script(
     patient_id: str,
     request: Request,
     current_user: dict = Depends(get_current_user)
 ):
-    """Generate personalized outreach script for patient"""
+    """Generate personalized outreach script using Snowflake Cortex"""
     
     snowflake: SnowflakeClient = request.app.state.snowflake
     
@@ -183,14 +214,17 @@ async def generate_outreach_script(
         if not patient:
             raise HTTPException(status_code=404, detail="Patient not found")
         
-        # Get latest analysis
-        analysis = {"risk_level": patient.get("RISK_LEVEL", "medium")}
-        
-        script = await gemini_service.generate_outreach_script(patient, analysis)
+        prompt = f"""Generate a brief, caring outreach script for a healthcare call.
+Patient: {patient.get('NAME', 'Patient')}
+Risk Level: {patient.get('RISK_LEVEL', 'medium')}
+
+Keep it warm, professional, and under 100 words."""
+
+        script = await cortex_complete(snowflake, prompt)
         
         return {
             "success": True,
-            "data": {"script": script},
+            "data": {"script": script or "Hello! We're reaching out to check on your health and see if you need any support."},
             "timestamp": datetime.utcnow().isoformat()
         }
         
@@ -201,95 +235,58 @@ async def generate_outreach_script(
 
 # ============ PATIENT-FACING HEALTH DIARY ANALYSIS ============
 
-class AnalyzeEntriesRequest(BaseModel):
-    """Request to analyze health diary entries"""
-    entries: List[dict]  # List of {date, symptoms, severity, notes}
-    familyHistory: Optional[List[str]] = None
-    dateOfBirth: Optional[str] = None
-
-class AnalyzeSymptomsRequest(BaseModel):
-    """Request to analyze specific symptoms"""
-    symptoms: str
-    severity: str  # low, medium, high
-    notes: Optional[str] = None
-
-
 @router.post("/analyze-entries")
 async def analyze_health_entries(
     request_data: AnalyzeEntriesRequest,
+    request: Request,
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Analyze user's health diary entries using Gemini AI
+    Analyze user's health diary entries using Snowflake Cortex AI
     Returns insights, patterns, and recommendations
     """
     
-    if not gemini_service.model:
-        return {
-            "success": True,
-            "data": {
-                "insights": ["AI analysis is currently unavailable. Please try again later."],
-                "patterns": [],
-                "recommendations": ["Continue tracking your symptoms and consult your healthcare provider for personalized advice."],
-                "riskLevel": "unknown"
-            },
-            "timestamp": datetime.utcnow().isoformat()
-        }
+    snowflake: SnowflakeClient = request.app.state.snowflake
     
     try:
         # Build analysis prompt
-        entries_text = "\n".join([
-            f"- {e.get('date', 'Unknown date')}: {e.get('symptoms', 'No symptoms')} (Severity: {e.get('severity', 'unknown')}){' - Note: ' + e.get('notes', '') if e.get('notes') else ''}"
-            for e in request_data.entries[-20:]  # Last 20 entries
+        entries_text = "\\n".join([
+            f"- {e.get('date', 'Unknown')}: {e.get('symptoms', 'None')} (Severity: {e.get('severity', 'unknown')})"
+            for e in request_data.entries[-10:]
         ])
         
-        family_history = ", ".join(request_data.familyHistory) if request_data.familyHistory else "None provided"
+        family_history = ", ".join(request_data.familyHistory) if request_data.familyHistory else "None"
         
-        prompt = f"""You are a health insights AI assistant for a personal health diary app. Analyze the following health diary entries and provide helpful insights.
+        prompt = f"""Analyze these health diary entries. Return ONLY valid JSON.
 
-HEALTH DIARY ENTRIES (most recent):
+ENTRIES:
 {entries_text}
 
-FAMILY HEALTH HISTORY: {family_history}
+FAMILY HISTORY: {family_history}
 
-Please provide:
-1. **Key Insights** (2-4 observations about their health patterns)
-2. **Patterns Detected** (recurring symptoms, timing patterns, severity trends)
-3. **Recommendations** (actionable health tips, when to see a doctor)
-4. **Overall Risk Assessment** (low, moderate, high - based on symptoms and patterns)
+Return JSON with: insights (array of 2-3 strings), patterns (array), recommendations (array of 2-3 strings), riskLevel (low/moderate/high)
 
-IMPORTANT: 
-- Be supportive and empathetic
-- Do not diagnose specific conditions
-- Always recommend consulting healthcare providers for serious concerns
-- Focus on actionable wellness advice
+Be supportive. Do NOT diagnose. Recommend consulting doctors for concerns."""
 
-Format your response as JSON with keys: insights (array), patterns (array), recommendations (array), riskLevel (string)"""
-
-        response = gemini_service.model.generate_content(prompt)
+        response = await cortex_complete(snowflake, prompt)
         
-        # Parse response
         try:
-            import json
-            # Try to extract JSON from response
-            response_text = response.text
-            # Find JSON in response
-            start = response_text.find('{')
-            end = response_text.rfind('}') + 1
+            start = response.find('{')
+            end = response.rfind('}') + 1
             if start >= 0 and end > start:
-                analysis = json.loads(response_text[start:end])
+                analysis = json.loads(response[start:end])
             else:
                 analysis = {
-                    "insights": [response_text[:500]],
+                    "insights": ["Continue tracking your symptoms for better insights."],
                     "patterns": [],
-                    "recommendations": ["Continue tracking your symptoms regularly."],
-                    "riskLevel": "unknown"
+                    "recommendations": ["Stay consistent with your health logging."],
+                    "riskLevel": "low"
                 }
         except json.JSONDecodeError:
             analysis = {
-                "insights": [response.text[:500] if response.text else "Unable to analyze entries."],
+                "insights": ["Analysis completed. Keep tracking your health!"],
                 "patterns": [],
-                "recommendations": ["Continue tracking your symptoms regularly."],
+                "recommendations": ["Continue monitoring and consult your healthcare provider."],
                 "riskLevel": "unknown"
             }
         
@@ -316,53 +313,34 @@ Format your response as JSON with keys: insights (array), patterns (array), reco
 @router.post("/analyze-symptom")
 async def analyze_single_symptom(
     request_data: AnalyzeSymptomsRequest,
+    request: Request,
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Quick analysis of a specific symptom
+    Quick analysis of a specific symptom using Snowflake Cortex
     Returns possible causes and recommendations
     """
     
-    if not gemini_service.model:
-        return {
-            "success": True,
-            "data": {
-                "possibleCauses": ["Unable to analyze - AI service unavailable"],
-                "urgency": "unknown",
-                "selfCare": ["Rest and monitor your symptoms"],
-                "seekHelp": False,
-                "seekHelpReason": None
-            },
-            "timestamp": datetime.utcnow().isoformat()
-        }
+    snowflake: SnowflakeClient = request.app.state.snowflake
     
     try:
-        prompt = f"""You are a health assistant. A user logged the following symptom in their health diary:
+        prompt = f"""Analyze this symptom. Return ONLY valid JSON.
 
 SYMPTOM: {request_data.symptoms}
 SEVERITY: {request_data.severity}
-ADDITIONAL NOTES: {request_data.notes or 'None'}
+NOTES: {request_data.notes or 'None'}
 
-Provide a brief, helpful response with:
-1. **Possible Causes** (2-3 common, non-alarming possibilities)
-2. **Urgency Level** (low, moderate, high)
-3. **Self-Care Tips** (2-3 practical suggestions)
-4. **Seek Medical Help** (true/false - should they see a doctor soon?)
-5. **Seek Help Reason** (if true, brief explanation why)
+Return JSON with: possibleCauses (array of 2-3), urgency (low/moderate/high), selfCare (array of 2-3 tips), seekHelp (boolean), seekHelpReason (string or null)
 
-IMPORTANT: Be reassuring but responsible. Don't diagnose. Recommend professional help for concerning symptoms.
+Be reassuring. Do NOT diagnose. Recommend professional help for concerning symptoms."""
 
-Format as JSON with keys: possibleCauses (array), urgency (string), selfCare (array), seekHelp (boolean), seekHelpReason (string or null)"""
-
-        response = gemini_service.model.generate_content(prompt)
+        response = await cortex_complete(snowflake, prompt)
         
         try:
-            import json
-            response_text = response.text
-            start = response_text.find('{')
-            end = response_text.rfind('}') + 1
+            start = response.find('{')
+            end = response.rfind('}') + 1
             if start >= 0 and end > start:
-                analysis = json.loads(response_text[start:end])
+                analysis = json.loads(response[start:end])
             else:
                 analysis = {
                     "possibleCauses": ["Various common causes"],

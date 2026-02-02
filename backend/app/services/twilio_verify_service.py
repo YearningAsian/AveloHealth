@@ -87,13 +87,12 @@ class TwilioVerifyService:
             dict with verification status
         """
         if not self._is_configured():
-            # Fallback for dev mode - accept any 6-digit code or "123456"
+            # Fallback for dev mode - always approve
             if settings.DEBUG:
-                is_valid = len(code) == 6 and code.isdigit()
-                print(f"📱 [DEV MODE] Verification check for {to}: {'approved' if is_valid else 'denied'}")
+                print(f"📱 [DEV MODE] Verification auto-approved for {to}")
                 return {
-                    "success": is_valid,
-                    "status": "approved" if is_valid else "denied",
+                    "success": True,
+                    "status": "approved",
                     "to": to,
                     "debug_mode": True
                 }

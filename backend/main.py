@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 import os
 from dotenv import load_dotenv
 
-from app.api.routes import patients, ai_analysis, appointments, auth, dashboard, teli, providers
+from app.api.routes import patients, ai_analysis, appointments, auth, dashboard, teli, providers, knowledge_base
 from app.core.config import settings
 from app.db.snowflake_client import SnowflakeClient
 
@@ -62,6 +62,7 @@ app.include_router(ai_analysis.router, prefix="/api/ai", tags=["AI Analysis"])
 app.include_router(appointments.router, prefix="/api/appointments", tags=["Appointments"])
 app.include_router(providers.router, prefix="/api/providers", tags=["Providers"])
 app.include_router(teli.router, prefix="/api/teli", tags=["Teli AI"])
+app.include_router(knowledge_base.router, prefix="/api/knowledge-base", tags=["Knowledge Base"])
 
 @app.get("/")
 async def root():
@@ -77,5 +78,5 @@ async def health_check():
     return {
         "status": "healthy",
         "snowflake": hasattr(app.state, 'snowflake'),
-        "gemini_configured": bool(settings.GEMINI_API_KEY)
+        "ai_provider": "snowflake_cortex"
     }
