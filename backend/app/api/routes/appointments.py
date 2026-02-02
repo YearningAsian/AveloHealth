@@ -224,16 +224,15 @@ async def get_appointment(
         raise HTTPException(status_code=500, detail="Failed to fetch appointment")
 
 
-@router.post("")
-async def create_appointment(
+@router.post("/test-summary-update")
+async def test_create_appointment_with_summary_update(
     appointment_data: AppointmentCreate,
-    request: Request,
-    current_user: dict = Depends(get_current_user)
+    request: Request
 ):
-    """Create a new appointment"""
+    """Create a new appointment (test endpoint for summary updates)"""
     
     snowflake: SnowflakeClient = request.app.state.snowflake
-    user_id = current_user.get("sub")
+    user_id = "test-user-id-123"  # Fixed test user for demo
     
     try:
         # Verify provider exists if provided
@@ -258,6 +257,12 @@ async def create_appointment(
         
         # Fetch the created appointment with provider details
         created = await snowflake.get_appointment_by_id(result["appointment_id"])
+        
+        # Update patient summary after appointment creation
+        try:
+            await update_patient_summary_after_appointment(snowflake, user_id, result["appointment_id"])
+        except Exception as e:
+            print(f"Warning: Failed to update patient summary: {e}")
         
         # Log audit
         await snowflake.log_audit({
@@ -792,3 +797,55 @@ async def get_next_appointment(
     except Exception as e:
         print(f"Get next appointment error: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch next appointment")
+
+
+# ============ PATIENT SUMMARY UPDATE ============
+
+async def update_patient_summary_after_appointment(snowflake: SnowflakeClient, user_id: str, appointment_id: str):
+    """
+    Update patient summary after appointment scheduling
+    """
+    try:
+        # Get patient info
+        patient = await snowflake.execute(
+            "SELECT first_name, last_name, phone FROM users WHERE user_id = %s",
+            (user_id,)
+        )
+        
+        if not patient:
+            return
+            
+        patient = patient[0]
+        
+        # Get recent appointments count
+        appointments = await snowflake.execute(
+            """SELECT COUNT(*) as count FROM appointments 
+               WHERE user_id = %s AND status = 'upcoming'""",
+            (user_id,)
+        )
+        
+        appointment_count = appointments[0]['COUNT'] if appointments else 0
+        
+        # Generate updated summary
+        summary = f"Patient {patient['FIRST_NAME']} {patient['LAST_NAME']} has {appointment_count} upcoming appointment(s). Last appointment scheduled on {datetime.utcnow().strftime('%Y-%m-%d')}."
+        
+        # Store/update in AI analyses table
+        try:
+            await snowflake.execute(
+                """INSERT INTO ai_analyses (analysis_id, patient_id, analysis_type, ai_insights, priority_level, analysis_date)
+                   VALUES (%s, %s, %s, %s, %s, %s)""",
+                (
+                    f"summary_{user_id}_{int(datetime.utcnow().timestamp())}",
+                    user_id,
+                    "patient_summary",
+                    summary,
+                    "info",
+                    datetime.utcnow()
+                )
+            )
+        except Exception as e:
+            print(f"Failed to store patient summary: {e}")
+            
+    except Exception as e:
+        print(f"Error updating patient summary: {e}")
+        raise

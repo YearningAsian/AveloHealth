@@ -280,3 +280,95 @@ async def tally_webhook(
             "message": f"Error processing webhook: {str(e)}",
             "timestamp": datetime.utcnow().isoformat()
         }
+
+
+@router.post("/refresh-summary/{patient_id}")
+async def refresh_patient_summary(
+    patient_id: str,
+    request: Request,
+    current_user: dict = Depends(get_current_user)
+):
+    """Refresh patient summary after profile updates"""
+    
+    snowflake: SnowflakeClient = request.app.state.snowflake
+    
+    try:
+        await update_patient_summary_after_profile_change(snowflake, patient_id)
+        
+        return {
+            "success": True,
+            "message": "Patient summary updated successfully",
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        error = HIPAACompliance.sanitize_error_message(e)
+        raise HTTPException(status_code=500, detail=error)
+
+
+async def update_patient_summary_after_profile_change(snowflake: SnowflakeClient, patient_id: str):
+    """
+    Update patient summary after profile changes
+    """
+    try:
+        # Get patient details with appointments
+        patient_data = await snowflake.execute(
+            """SELECT u.first_name, u.last_name, u.phone, u.date_of_birth, u.chronic_conditions,
+                      COUNT(a.appointment_id) as upcoming_appointments
+               FROM users u
+               LEFT JOIN appointments a ON u.user_id = a.user_id AND a.status = 'upcoming'
+               WHERE u.user_id = %s
+               GROUP BY u.user_id, u.first_name, u.last_name, u.phone, u.date_of_birth, u.chronic_conditions""",
+            (patient_id,)
+        )
+        
+        if not patient_data:
+            return
+            
+        patient = patient_data[0]
+        
+        # Calculate age from DOB
+        dob = patient.get('DATE_OF_BIRTH')
+        age = "unknown"
+        if dob:
+            from datetime import date
+            today = date.today()
+            if isinstance(dob, str):
+                try:
+                    dob = datetime.strptime(dob, '%Y-%m-%d').date()
+                except:
+                    pass
+            if isinstance(dob, date):
+                age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+        
+        # Generate comprehensive summary
+        summary_parts = [
+            f"Patient: {patient['FIRST_NAME']} {patient['LAST_NAME']}",
+            f"Age: {age}",
+            f"Upcoming appointments: {patient['UPCOMING_APPOINTMENTS'] or 0}"
+        ]
+        
+        if patient.get('CHRONIC_CONDITIONS'):
+            summary_parts.append(f"Chronic conditions: {patient['CHRONIC_CONDITIONS']}")
+            
+        summary = ". ".join(summary_parts) + "."
+        
+        # Update AI analyses with new summary
+        await snowflake.execute(
+            """INSERT INTO ai_analyses (analysis_id, patient_id, analysis_type, ai_insights, priority_level, analysis_date)
+               VALUES (%s, %s, %s, %s, %s, %s)""",
+            (
+                f"profile_summary_{patient_id}_{int(datetime.utcnow().timestamp())}",
+                patient_id,
+                "profile_summary",
+                summary,
+                "info",
+                datetime.utcnow()
+            )
+        )
+        
+        print(f"Updated patient summary for {patient_id}: {summary}")
+        
+    except Exception as e:
+        print(f"Error updating patient summary after profile change: {e}")
+        raise

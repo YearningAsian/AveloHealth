@@ -52,6 +52,7 @@ export interface SignUpData {
 export interface User {
   id: string;
   name: string;
+  email: string;
   dateOfBirth: string;
   phoneNumber: string;
   accountNumber: string;
@@ -94,8 +95,13 @@ export const authAPI = {
     return response.data;
   },
 
-  sendVerificationCode: async (phoneNumber: string) => {
-    const response = await api.post('/api/auth/send-verification', { phoneNumber });
+  verifyEmail: async (email: string, code: string) => {
+    const response = await api.post('/api/auth/verify-email', { email, code });
+    return response.data;
+  },
+
+  sendVerificationCode: async (phoneNumber?: string, email?: string, channel: 'sms' | 'email' | 'call' = 'sms') => {
+    const response = await api.post('/api/auth/send-verification', { phoneNumber, email, channel });
     return response.data;
   },
 
@@ -137,6 +143,11 @@ export const dashboardAPI = {
     const response = await api.patch('/api/dashboard/profile', data);
     return response.data;
   },
+
+  getAIInsights: async () => {
+    const response = await api.get('/api/dashboard/ai-insights');
+    return response.data;
+  },
 };
 
 // Appointments API
@@ -168,7 +179,7 @@ export const appointmentsAPI = {
   },
 
   createAppointment: async (data: {
-    providerId: string;
+    providerId?: string;
     title: string;
     appointmentDate: string;
     appointmentTime: string;
@@ -197,6 +208,11 @@ export const appointmentsAPI = {
 
   toggleReminder: async (id: string, enabled: boolean): Promise<{ success: boolean }> => {
     const response = await api.patch(`/api/appointments/${id}/reminder`, { enabled });
+    return response.data;
+  },
+
+  deleteAppointment: async (id: string): Promise<{ success: boolean }> => {
+    const response = await api.delete(`/api/appointments/${id}`);
     return response.data;
   },
 };

@@ -292,3 +292,69 @@ async def update_profile(
             "profileImage": profile.profileImage
         }
     }
+
+@router.get("/ai-insights")
+async def get_ai_insights(
+    request: Request,
+    current_user: dict = Depends(get_current_user)
+):
+    """Get AI-powered health insights based on diary entries using Snowflake Cortex"""
+    
+    db = request.app.state.snowflake
+    user_id = current_user.get("sub")
+    
+    # Get user profile
+    user_result = await db.execute(
+        "SELECT * FROM users WHERE user_id = %(user_id)s",
+        {"user_id": user_id}
+    )
+    
+    user_info = {
+        "name": current_user.get("name", "Patient"),
+        "age": None
+    }
+    
+    if user_result:
+        user = user_result[0]
+        user_info["name"] = user.get('NAME', current_user.get("name", "Patient"))
+        dob = user.get('DATE_OF_BIRTH')
+        if dob:
+            try:
+                birth_date = datetime.strptime(str(dob), "%Y-%m-%d")
+                user_info["age"] = (datetime.now() - birth_date).days // 365
+            except:
+                pass
+    
+    # Get diary entries
+    entries_result = await db.execute("""
+        SELECT entry_id, entry_date, symptoms, severity, category, notes
+        FROM diary_entries 
+        WHERE user_id = %(user_id)s
+        ORDER BY entry_date DESC
+        LIMIT 50
+    """, {"user_id": user_id})
+    
+    entries = []
+    for e in entries_result:
+        entries.append({
+            "id": e.get('ENTRY_ID'),
+            "date": str(e.get('ENTRY_DATE', '')),
+            "symptoms": e.get('SYMPTOMS', ''),
+            "severity": e.get('SEVERITY', 'low'),
+            "category": e.get('CATEGORY', 'General'),
+            "notes": e.get('NOTES')
+        })
+    
+    # Generate AI insights using Snowflake Cortex
+    insights = await db.generate_health_insights(entries, user_info)
+    
+    return {
+        "success": insights.get("success", False),
+        "data": {
+            "insights": insights.get("insights", []),
+            "recommendations": insights.get("recommendations", []),
+            "summary": insights.get("summary", ""),
+            "patterns": insights.get("patterns", []),
+            "entriesAnalyzed": len(entries)
+        }
+    }
